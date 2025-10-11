@@ -48,8 +48,6 @@ void GreenhouseController::begin() {
         }
     }
 
-    initialiseNetwork();
-
     // Prepare each zone's driver, button, and timing state.
     for (size_t i = 0; i < config_.zoneCount; ++i) {
         const auto &zone = config_.zones[i];
@@ -105,6 +103,7 @@ void GreenhouseController::begin() {
     lastClimateReadMs_ = millis();
     climateHoldMinTempF_ = config_.climateHold.minTemperatureF;
 
+    initialiseNetwork();
     setupWebServer();
     updateDisplay();
 }
