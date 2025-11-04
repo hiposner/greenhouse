@@ -1,0 +1,51 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "PlatformIO: Build (firmware)",
+            "type": "shell",
+            "command": "platformio",
+            "args": [
+                "run"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\firmware"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "PlatformIO: Upload (firmware)",
+            "type": "shell",
+            "command": "platformio",
+            "args": [
+                "run",
+                "--target",
+                "upload"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\firmware"
+            },
+            "group": {
+                "kind": "build"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "PlatformIO: Monitor (firmware)",
+            "type": "shell",
+            "command": "platformio",
+            "args": [
+                "device",
+                "monitor"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}\\firmware"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
