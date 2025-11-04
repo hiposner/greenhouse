@@ -56,15 +56,20 @@
     .connect-btn:not(:disabled):hover {
       background: var(--accent-dark);
     }
-    .mode-pill {
+    .mode-group {
       padding: 0.4rem 0.8rem;
       border-radius: 999px;
       background: #edf2f7;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .mode-pill {
       font-weight: 600;
     }
     .mode-select {
-      padding: 0.4rem 0.8rem;
-      border-radius: 8px;
+      padding: 0.2rem 0.6rem;
+      border-radius: 10px;
       border: 1px solid #cbd5f5;
       background: transparent;
       color: inherit;
@@ -263,7 +268,7 @@
         --accent-dark: #17a187;
         --danger: #f87171;
       }
-      .mode-pill {
+      .mode-group {
         background: #334155;
       }
       .actions button.secondary {
@@ -277,11 +282,13 @@
   <header>
     <h1>Greenhouse Control</h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
-      <span class="mode-pill" id="mode-pill">Mode: --</span>
-      <select class="mode-select" id="mode-select" disabled>
-        <option value="AUTO">Auto</option>
-        <option value="OFF">Off (manual only)</option>
-      </select>
+      <div class="mode-group">
+        <span class="mode-pill" id="mode-pill">Mode: --</span>
+        <select class="mode-select" id="mode-select" disabled>
+          <option value="AUTO">Auto</option>
+          <option value="OFF">Off (manual only)</option>
+        </select>
+      </div>
       <button class="connect-btn" id="connect-btn">Connect via Bluetooth</button>
     </div>
   </header>
@@ -455,8 +462,8 @@
         return;
       }
       try {
-        connectBtn.disabled = true;
-    log('Requesting Bluetooth device...');
+        setConnectButtonState('connecting');
+        log('Requesting Bluetooth device...');
         device = await navigator.bluetooth.requestDevice({
           filters: [{ services: [serviceUuid] }]
         });
@@ -465,7 +472,9 @@
       } catch (error) {
         log(`Connect failed: ${error.message || error}`);
       } finally {
-        connectBtn.disabled = false;
+        if (!device || !device.gatt || !device.gatt.connected) {
+          setConnectButtonState('disconnected');
+        }
       }
     });
 
@@ -565,7 +574,7 @@
       disableTileButtons(false);
       disableModeControl(false);
       setModeControlValue(baseMode);
-      connectBtn.textContent = 'Disconnect';
+      setConnectButtonState('connected');
       log('Subscribed to notifications.');
       appendMode('Connecting...');
       await syncTime();
@@ -576,7 +585,7 @@
       log('Disconnected.');
       disableTileButtons(true);
       disableModeControl(true);
-      connectBtn.textContent = 'Connect via Bluetooth';
+      setConnectButtonState('disconnected');
       if (!reconnecting) {
         appendMode('--');
       }
@@ -683,6 +692,22 @@
         return;
       }
       modeSelect.disabled = disabled;
+    }
+
+    function setConnectButtonState(state) {
+      if (!connectBtn) {
+        return;
+      }
+      if (state === 'connecting') {
+        connectBtn.textContent = 'Connecting...';
+        connectBtn.disabled = true;
+      } else if (state === 'connected') {
+        connectBtn.textContent = 'Disconnect';
+        connectBtn.disabled = false;
+      } else {
+        connectBtn.textContent = 'Connect via Bluetooth';
+        connectBtn.disabled = false;
+      }
     }
 
     function setModeControlValue(value) {
