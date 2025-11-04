@@ -62,6 +62,14 @@
       background: #edf2f7;
       font-weight: 600;
     }
+    .mode-select {
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      border: 1px solid #cbd5f5;
+      background: transparent;
+      color: inherit;
+      font-weight: 600;
+    }
     main {
       flex: 1;
       padding: clamp(1rem, 4vw, 2rem);
@@ -270,6 +278,10 @@
     <h1>Greenhouse Control</h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <span class="mode-pill" id="mode-pill">Mode: --</span>
+      <select class="mode-select" id="mode-select" disabled>
+        <option value="AUTO">Auto</option>
+        <option value="OFF">Off (manual only)</option>
+      </select>
       <button class="connect-btn" id="connect-btn">Connect via Bluetooth</button>
     </div>
   </header>
@@ -351,10 +363,10 @@
         <label>
           Zone
           <select id="schedule-zone" required>
-            <option value="line1">Blue (Line 1)</option>
-            <option value="line2">Yellow (Line 2)</option>
-            <option value="line3">Green (Line 3)</option>
-            <option value="mister">Red (Mister)</option>
+            <option value="line1">Red (Line 1)</option>
+            <option value="line2">Green (Line 2)</option>
+            <option value="line3">Yellow (Line 3)</option>
+            <option value="mister">Blue (Mister)</option>
             <option value="fan">Fan</option>
             <option value="lights">Grow Lights</option>
           </select>
@@ -408,18 +420,21 @@
     let txCharacteristic;
     let reconnecting = false;
     const zoneDefaults = {
-      line1: 'Blue',
-      line2: 'Yellow',
-      line3: 'Green',
-      mister: 'Red',
+      line1: 'Red (Line 1)',
+      line2: 'Green (Line 2)',
+      line3: 'Yellow (Line 3)',
+      mister: 'Blue (Mister)',
       fan: 'Fan',
       lights: 'Grow Lights'
     };
     let zoneLabels = { ...zoneDefaults };
     let scheduleState = [];
+    let baseMode = 'AUTO';
+    let updatingModeControl = false;
 
     const connectBtn = document.getElementById('connect-btn');
     const modePill = document.getElementById('mode-pill');
+    const modeSelect = document.getElementById('mode-select');
     const logOutput = document.getElementById('log-output');
     const tiles = Array.from(document.querySelectorAll('.tile'));
     const scheduleForm = document.getElementById('schedule-form');
@@ -430,6 +445,8 @@
     const dayCheckboxes = Array.from(document.querySelectorAll('input[name="schedule-day"]'));
 
     disableTileButtons(true);
+    disableModeControl(true);
+    setModeControlValue(baseMode);
     updateTileLabels();
 
     connectBtn.addEventListener('click', async () => {
@@ -515,6 +532,21 @@
       sendDeleteSchedule(id);
     });
 
+    if (modeSelect) {
+      modeSelect.addEventListener('change', () => {
+        if (updatingModeControl) {
+          return;
+        }
+        if (!rxCharacteristic) {
+          setModeControlValue(baseMode);
+          return;
+        }
+        const desired = modeSelect.value;
+        baseMode = desired;
+        sendSetMode(desired);
+      });
+    }
+
     async function connect() {
       if (!device) {
         log('No Bluetooth device selected.');
@@ -531,6 +563,8 @@
       txCharacteristic.addEventListener('characteristicvaluechanged', handleNotification);
 
       disableTileButtons(false);
+      disableModeControl(false);
+      setModeControlValue(baseMode);
       connectBtn.textContent = 'Disconnect';
       log('Subscribed to notifications.');
       appendMode('Connecting...');
@@ -541,6 +575,7 @@
     function handleDisconnect() {
       log('Disconnected.');
       disableTileButtons(true);
+      disableModeControl(true);
       connectBtn.textContent = 'Connect via Bluetooth';
       if (!reconnecting) {
         appendMode('--');
@@ -571,6 +606,13 @@
           if (Array.isArray(msg.schedules)) {
             scheduleState = msg.schedules;
             renderSchedules();
+          }
+          if (msg.baseMode) {
+            baseMode = msg.baseMode;
+            setModeControlValue(baseMode);
+          }
+          if (!modeSelect.disabled) {
+            disableModeControl(false);
           }
         } else if (msg.evt === 'pong') {
           log('Pong received.');
@@ -636,6 +678,22 @@
       });
     }
 
+    function disableModeControl(disabled) {
+      if (!modeSelect) {
+        return;
+      }
+      modeSelect.disabled = disabled;
+    }
+
+    function setModeControlValue(value) {
+      if (!modeSelect) {
+        return;
+      }
+      updatingModeControl = true;
+      modeSelect.value = value;
+      updatingModeControl = false;
+    }
+
     function applyZoneLabels(labels) {
       zoneLabels = { ...zoneLabels, ...labels };
       updateTileLabels();
@@ -693,6 +751,10 @@
 
     async function sendSetSchedule(schedule) {
       await sendJson({ cmd: 'setSchedule', ...schedule });
+    }
+
+    async function sendSetMode(mode) {
+      await sendJson({ cmd: 'setMode', mode });
     }
 
     async function sendDeleteSchedule(id) {
