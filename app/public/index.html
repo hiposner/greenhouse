@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Greenhouse Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --accent: #2f855a;
+      --accent-dark: #276749;
+      --danger: #c53030;
+      --text: #1a202c;
+      font-family: "Segoe UI", Roboto, sans-serif;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 1rem clamp(1rem, 4vw, 2rem);
+      background: var(--surface);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+    header h1 {
+      margin: 0;
+      font-weight: 600;
+      font-size: clamp(1.4rem, 4vw, 1.8rem);
+    }
+    .connect-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding: 0.6rem 1.4rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .connect-btn:disabled {
+      cursor: not-allowed;
+      background: #a0aec0;
+    }
+    .connect-btn:not(:disabled):hover {
+      background: var(--accent-dark);
+    }
+    .mode-pill {
+      padding: 0.4rem 0.8rem;
+      border-radius: 999px;
+      background: #edf2f7;
+      font-weight: 600;
+    }
+    main {
+      flex: 1;
+      padding: clamp(1rem, 4vw, 2rem);
+      display: grid;
+      gap: 1.5rem;
+    }
+    .tiles {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .tile {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .tile[data-state="ON"] {
+      border-left: 6px solid var(--accent);
+    }
+    .tile h3 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+    .state-label {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .state-label[data-state="ON"] {
+      color: var(--accent);
+    }
+    .state-label[data-state="OFF"] {
+      color: #4a5568;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .actions button {
+      flex: 1;
+      min-width: 4.5rem;
+      padding: 0.45rem 0.5rem;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter 0.15s ease;
+    }
+    .actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .actions button.primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .actions button.secondary {
+      background: #e2e8f0;
+      color: #1a202c;
+    }
+    .actions button.danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    .actions button:not(:disabled):hover {
+      filter: brightness(0.95);
+    }
+    .log {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    .log h2 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.1rem;
+    }
+    #log-output {
+      height: 180px;
+      margin: 0;
+      overflow: auto;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .scheduler {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .scheduler h2 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+    .schedule-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.75rem;
+      align-items: end;
+    }
+    .schedule-form label,
+    .schedule-form fieldset {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      font-size: 0.9rem;
+    }
+    .schedule-form input,
+    .schedule-form select {
+      padding: 0.4rem;
+      border-radius: 6px;
+      border: 1px solid #cbd5f5;
+      font-size: 0.95rem;
+      background: transparent;
+      color: inherit;
+    }
+    .schedule-form fieldset {
+      border: 1px solid #cbd5f5;
+      border-radius: 8px;
+      padding: 0.5rem;
+      min-height: 100%;
+    }
+    .day-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(40px, 1fr));
+      gap: 0.3rem;
+      font-size: 0.85rem;
+    }
+    .schedule-form button {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      min-height: 40px;
+    }
+    .schedule-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .schedule-card {
+      border: 1px solid #cbd5f5;
+      border-radius: 10px;
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .schedule-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+    }
+    .schedule-card button {
+      border: none;
+      background: var(--danger);
+      color: #fff;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+    }
+    .schedule-card-details {
+      font-size: 0.9rem;
+      color: #4a5568;
+    }
+    .schedule-list.empty {
+      color: #718096;
+      font-style: italic;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --surface: #1e293b;
+        --text: #f1f5f9;
+        --accent: #25c19f;
+        --accent-dark: #17a187;
+        --danger: #f87171;
+      }
+      .mode-pill {
+        background: #334155;
+      }
+      .actions button.secondary {
+        background: #334155;
+        color: #e2e8f0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Greenhouse Control</h1>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <span class="mode-pill" id="mode-pill">Mode: --</span>
+      <button class="connect-btn" id="connect-btn">Connect via Bluetooth</button>
+    </div>
+  </header>
+  <main>
+    <section class="tiles" id="tiles">
+      <div class="tile" data-zone="line1" data-state="OFF">
+        <h3>Line 1</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+      <div class="tile" data-zone="line2" data-state="OFF">
+        <h3>Line 2</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+      <div class="tile" data-zone="line3" data-state="OFF">
+        <h3>Line 3</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+      <div class="tile" data-zone="mister" data-state="OFF">
+        <h3>Mister</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+      <div class="tile" data-zone="fan" data-state="OFF">
+        <h3>Fan</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+      <div class="tile" data-zone="lights" data-state="OFF">
+        <h3>Grow Lights</h3>
+        <span class="state-label" data-state="OFF">OFF</span>
+        <div class="actions">
+          <button class="primary" data-action="on">ON</button>
+          <button class="danger" data-action="off">OFF</button>
+          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
+          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
+          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        </div>
+      </div>
+    </section>
+    <section class="scheduler">
+      <div>
+        <h2>Schedules</h2>
+        <p style="margin:0;color:#718096;font-size:0.9rem;">Automate zones by day and time.</p>
+      </div>
+      <form id="schedule-form" class="schedule-form">
+        <label>
+          Zone
+          <select id="schedule-zone" required>
+            <option value="line1">Blue (Line 1)</option>
+            <option value="line2">Yellow (Line 2)</option>
+            <option value="line3">Green (Line 3)</option>
+            <option value="mister">Red (Mister)</option>
+            <option value="fan">Fan</option>
+            <option value="lights">Grow Lights</option>
+          </select>
+        </label>
+        <label>
+          Time
+          <input type="time" id="schedule-time" required>
+        </label>
+        <label>
+          Duration (s)
+          <input type="number" id="schedule-duration" min="30" max="3600" step="30" value="300" required>
+        </label>
+        <fieldset>
+          <legend style="font-size:0.9rem;">Days</legend>
+          <div class="day-grid">
+            <label><input type="checkbox" name="schedule-day" value="Sun">Sun</label>
+            <label><input type="checkbox" name="schedule-day" value="Mon" checked>Mon</label>
+            <label><input type="checkbox" name="schedule-day" value="Tue" checked>Tue</label>
+            <label><input type="checkbox" name="schedule-day" value="Wed" checked>Wed</label>
+            <label><input type="checkbox" name="schedule-day" value="Thu" checked>Thu</label>
+            <label><input type="checkbox" name="schedule-day" value="Fri" checked>Fri</label>
+            <label><input type="checkbox" name="schedule-day" value="Sat">Sat</label>
+          </div>
+        </fieldset>
+        <button type="submit">Add Schedule</button>
+      </form>
+      <div id="schedule-list" class="schedule-list empty">No schedules yet.</div>
+    </section>
+    <section class="log">
+      <h2>Event Log</h2>
+      <pre id="log-output">Ready.</pre>
+    </section>
+  </main>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => {
+        console.warn('Service worker registration failed', err);
+      });
+    }
+
+    const serviceUuid = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const rxUuid = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+    const txUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+    const textDecoder = new TextDecoder();
+    const textEncoder = new TextEncoder();
+
+    let device;
+    let server;
+    let rxCharacteristic;
+    let txCharacteristic;
+    let reconnecting = false;
+    const zoneDefaults = {
+      line1: 'Blue',
+      line2: 'Yellow',
+      line3: 'Green',
+      mister: 'Red',
+      fan: 'Fan',
+      lights: 'Grow Lights'
+    };
+    let zoneLabels = { ...zoneDefaults };
+    let scheduleState = [];
+
+    const connectBtn = document.getElementById('connect-btn');
+    const modePill = document.getElementById('mode-pill');
+    const logOutput = document.getElementById('log-output');
+    const tiles = Array.from(document.querySelectorAll('.tile'));
+    const scheduleForm = document.getElementById('schedule-form');
+    const scheduleList = document.getElementById('schedule-list');
+    const scheduleZoneSelect = document.getElementById('schedule-zone');
+    const scheduleTimeInput = document.getElementById('schedule-time');
+    const scheduleDurationInput = document.getElementById('schedule-duration');
+    const dayCheckboxes = Array.from(document.querySelectorAll('input[name="schedule-day"]'));
+
+    disableTileButtons(true);
+    updateTileLabels();
+
+    connectBtn.addEventListener('click', async () => {
+      if (device && device.gatt && device.gatt.connected) {
+        device.gatt.disconnect();
+        return;
+      }
+      try {
+        connectBtn.disabled = true;
+    log('Requesting Bluetooth device...');
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [serviceUuid] }]
+        });
+        device.addEventListener('gattserverdisconnected', handleDisconnect);
+        await connect();
+      } catch (error) {
+        log(`Connect failed: ${error.message || error}`);
+      } finally {
+        connectBtn.disabled = false;
+      }
+    });
+
+    tiles.forEach(tile => {
+      tile.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLButtonElement)) {
+          return;
+        }
+        if (target.disabled) {
+          return;
+        }
+        const zone = tile.getAttribute('data-zone');
+        const action = target.getAttribute('data-action');
+        if (!zone || !action) {
+          return;
+        }
+        if (action === 'on') {
+          sendSetValve(zone, 'ON');
+        } else if (action === 'off') {
+          sendSetValve(zone, 'OFF');
+        } else if (action === 'pulse') {
+          const duration = Number(target.getAttribute('data-duration') || '0');
+          sendSetValve(zone, 'ON', duration);
+        }
+      });
+    });
+
+    scheduleForm.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!rxCharacteristic) {
+        log('Not connected.');
+        return;
+      }
+      const zone = scheduleZoneSelect.value;
+      const timeValue = scheduleTimeInput.value;
+      const duration = parseInt(scheduleDurationInput.value, 10);
+      const days = dayCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+      if (!timeValue || Number.isNaN(duration) || duration <= 0 || days.length === 0) {
+        log('Schedule form incomplete.');
+        return;
+      }
+      const [hourStr, minuteStr] = timeValue.split(':');
+      const hour = parseInt(hourStr, 10);
+      const minute = parseInt(minuteStr, 10);
+      const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sched-${Date.now()}`;
+      sendSetSchedule({
+        id,
+        zone,
+        hour,
+        minute,
+        duration_s: duration,
+        days
+      });
+      scheduleForm.reset();
+    });
+
+    scheduleList.addEventListener('click', event => {
+      const button = event.target.closest('button[data-id]');
+      if (!button) {
+        return;
+      }
+      const { id } = button.dataset;
+      sendDeleteSchedule(id);
+    });
+
+    async function connect() {
+      if (!device) {
+        log('No Bluetooth device selected.');
+        return;
+      }
+      log('Connecting to GATT server...');
+      server = await device.gatt.connect();
+      log('Connected, discovering services...');
+      const service = await server.getPrimaryService(serviceUuid);
+      rxCharacteristic = await service.getCharacteristic(rxUuid);
+      txCharacteristic = await service.getCharacteristic(txUuid);
+
+      await txCharacteristic.startNotifications();
+      txCharacteristic.addEventListener('characteristicvaluechanged', handleNotification);
+
+      disableTileButtons(false);
+      connectBtn.textContent = 'Disconnect';
+      log('Subscribed to notifications.');
+      appendMode('Connecting...');
+      await syncTime();
+      sendPing();
+    }
+
+    function handleDisconnect() {
+      log('Disconnected.');
+      disableTileButtons(true);
+      connectBtn.textContent = 'Connect via Bluetooth';
+      if (!reconnecting) {
+        appendMode('--');
+      }
+    }
+
+    function handleNotification(event) {
+      const value = event.target.value;
+      if (!value) {
+        return;
+      }
+      const json = textDecoder.decode(value);
+      log(`RX ${json}`);
+      try {
+        const msg = JSON.parse(json);
+        if (msg.evt === 'state') {
+          if (msg.mode) {
+            appendMode(msg.mode);
+          }
+          if (msg.zones) {
+            Object.entries(msg.zones).forEach(([zone, state]) => {
+              updateZoneTile(zone, state);
+            });
+          }
+          if (msg.zoneLabels) {
+            applyZoneLabels(msg.zoneLabels);
+          }
+          if (Array.isArray(msg.schedules)) {
+            scheduleState = msg.schedules;
+            renderSchedules();
+          }
+        } else if (msg.evt === 'pong') {
+          log('Pong received.');
+        }
+      } catch (error) {
+        log(`JSON error: ${error.message || error}`);
+      }
+    }
+
+    function updateZoneTile(zone, state) {
+      const tile = tiles.find(t => t.getAttribute('data-zone') === zone);
+      if (!tile) {
+        return;
+      }
+      const normalized = state === 'ON' ? 'ON' : 'OFF';
+      tile.setAttribute('data-state', normalized);
+      const label = tile.querySelector('.state-label');
+      if (label) {
+        label.dataset.state = normalized;
+        label.textContent = normalized;
+      }
+    }
+
+    async function sendSetValve(zone, state, durationSeconds = 0) {
+      if (!rxCharacteristic) {
+        log('Not connected.');
+        return;
+      }
+      const payload = {
+        cmd: 'setValve',
+        zone,
+        state,
+      };
+      if (durationSeconds > 0) {
+        payload.duration_s = durationSeconds;
+      }
+      await sendJson(payload);
+    }
+
+    async function sendPing() {
+      await sendJson({ cmd: 'ping' });
+    }
+
+    async function sendJson(obj) {
+      if (!rxCharacteristic) {
+        return;
+      }
+      const json = JSON.stringify(obj);
+      log(`TX ${json}`);
+      const data = textEncoder.encode(json);
+      if ('writeValueWithoutResponse' in rxCharacteristic) {
+        await rxCharacteristic.writeValueWithoutResponse(data);
+      } else {
+        await rxCharacteristic.writeValue(data);
+      }
+    }
+
+    function disableTileButtons(disabled) {
+      tiles.forEach(tile => {
+        tile.querySelectorAll('button').forEach(button => {
+          button.disabled = disabled;
+        });
+      });
+    }
+
+    function applyZoneLabels(labels) {
+      zoneLabels = { ...zoneLabels, ...labels };
+      updateTileLabels();
+    }
+
+    function updateTileLabels() {
+      tiles.forEach(tile => {
+        const zone = tile.getAttribute('data-zone');
+        const heading = tile.querySelector('h3');
+        if (zone && heading) {
+          heading.textContent = zoneLabels[zone] || zoneDefaults[zone] || zone;
+        }
+      });
+    }
+
+    function renderSchedules() {
+      scheduleList.innerHTML = '';
+      if (!scheduleState.length) {
+        scheduleList.classList.add('empty');
+        scheduleList.textContent = 'No schedules yet.';
+        return;
+      }
+      scheduleList.classList.remove('empty');
+      scheduleState.forEach(entry => {
+        const card = document.createElement('div');
+        card.className = 'schedule-card';
+        const label = zoneLabels[entry.zone] || zoneDefaults[entry.zone] || entry.zone;
+        const time = formatTime(entry.hour, entry.minute);
+        const durationMinutes = (entry.duration_s || 0) / 60;
+        const durationText = durationMinutes >= 1 ? `${durationMinutes.toFixed(1)} min` : `${entry.duration_s} s`;
+        const daysText = Array.isArray(entry.days) && entry.days.length ? entry.days.join(', ') : 'Daily';
+        card.innerHTML = `
+          <div class="schedule-card-header">
+            <span>${label}</span>
+            <button type="button" data-id="${entry.id}">Delete</button>
+          </div>
+          <div class="schedule-card-details">
+            ${time} · ${durationText} · ${daysText}
+          </div>
+        `;
+        scheduleList.appendChild(card);
+      });
+    }
+
+    function formatTime(hour, minute) {
+      const h = Number(hour);
+      const m = Number(minute);
+      if (Number.isNaN(h) || Number.isNaN(m)) {
+        return '--:--';
+      }
+      const period = h >= 12 ? 'PM' : 'AM';
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
+    }
+
+    async function sendSetSchedule(schedule) {
+      await sendJson({ cmd: 'setSchedule', ...schedule });
+    }
+
+    async function sendDeleteSchedule(id) {
+      if (!id) {
+        return;
+      }
+      await sendJson({ cmd: 'deleteSchedule', id });
+    }
+
+    async function syncTime() {
+      const epochSeconds = Math.floor(Date.now() / 1000);
+      await sendJson({ cmd: 'setTime', epoch: epochSeconds });
+    }
+
+    function appendMode(mode) {
+      modePill.textContent = `Mode: ${mode}`;
+    }
+
+    function log(message) {
+      const timestamp = new Date().toLocaleTimeString();
+      logOutput.textContent += `\n[${timestamp}] ${message}`;
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
+  </script>
+</body>
+</html>
