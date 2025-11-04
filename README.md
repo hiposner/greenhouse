@@ -52,7 +52,7 @@ ESP32 DOIT DevKit v1 (USB jack up orientation). All driver outputs are active-lo
 3. Serial monitor at `115200` baud.
 
 Key behaviour:
-- Six zones: three irrigation lines (named Blue/Yellow/Green), mister (Red), fan, and grow lights.
+- Six zones: three irrigation lines (Red/Green/Yellow for Lines 1/2/3), mister (Blue), fan, and grow lights.
 - Active-low outputs (`LOW` energises the driver).
 - Manual buttons trigger toggle with 60 ms debounce and a default 180 s safety timer.
 - Interlock ensures only one irrigation line (Line1/Line2/Line3) is active at a time.
@@ -82,6 +82,7 @@ This launches `python3 -m http.server 5173 -d public` for quick testing. You can
 - Connect via Web Bluetooth (Chrome / Edge / Android).
 - Live dashboard with ON/OFF controls plus 5/10/15 minute timers.
 - Scheduler UI to add/delete per-zone schedules (days, time, duration).
+- Mode selector for Auto vs Off; MANUAL status appears automatically during overrides.
 - Displays current mode (AUTO/MANUAL) and a running event log.
 - Parses JSON notifications from the ESP32 and keeps tiles + schedules in sync.
 - Offline-capable PWA with a service worker (`app/public/sw.js`) so you can “Install app” on each phone and run it without a constant server.
@@ -98,6 +99,9 @@ This launches `python3 -m http.server 5173 -d public` for quick testing. You can
 - Add schedules from the “Schedules” card: pick a zone, time, duration, and days of week. Entries sync to the ESP32 and run even if the phone disconnects.
 - Delete schedules with the in-app button; the controller stores up to 16 entries in memory.
 - Manual controls still respect the irrigation interlock and safety timers even when scheduled runs are active.
+- Modes:
+  - **Auto** enables the scheduler; the UI briefly shows **MANUAL** whenever a manual override is running.
+  - **Off** disables schedules (manual-only control) but you can still toggle zones via buttons/BLE.
 
 ### Pairing (Android Chrome example)
 

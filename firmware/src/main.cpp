@@ -18,8 +18,8 @@ enum Zone {
 };
 
 enum ControlMode {
-    MODE_AUTO = 0,
-    MODE_MANUAL
+    MODE_OFF = 0,
+    MODE_AUTO
 };
 
 static const uint8_t ZONE_OUTPUT_PINS[Z_COUNT] = {
@@ -45,7 +45,7 @@ static const char *ZONE_KEYS[Z_COUNT] = {
 };
 
 static const char *ZONE_LABELS[Z_COUNT] = {
-    "Blue", "Yellow", "Green", "Red", "Fan", "Grow Lights"
+    "Red (Line 1)", "Green (Line 2)", "Yellow (Line 3)", "Blue (Mister)", "Fan", "Grow Lights"
 };
 
 struct ZoneState {
@@ -102,6 +102,8 @@ static bool addOrUpdateSchedule(const ScheduleEntry &entry);
 static bool removeScheduleById(const String &id);
 static time_t currentEpoch();
 static void syncTime(uint32_t epochSeconds);
+static bool manualOverrideActive();
+static const char *reportedMode();
 
 static inline void IRAM_ATTR registerButtonEvent(uint8_t index) {
     uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
@@ -152,8 +154,8 @@ static CommandCallbacks commandCallbacks;
 
 static const char *modeToString(ControlMode mode) {
     switch (mode) {
-    case MODE_MANUAL:
-        return "MANUAL";
+    case MODE_OFF:
+        return "OFF";
     case MODE_AUTO:
     default:
         return "AUTO";
@@ -273,7 +275,8 @@ static void publishState() {
     JsonDocument doc;
     doc["evt"] = "state";
     doc["ts"] = millis();
-    doc["mode"] = modeToString(currentMode);
+    doc["mode"] = reportedMode();
+    doc["baseMode"] = modeToString(currentMode);
     doc["timeSynced"] = timeSynced;
     if (timeSynced) {
         doc["epoch"] = static_cast<uint32_t>(currentEpoch());
@@ -284,16 +287,16 @@ static void publishState() {
         zones[ZONE_KEYS[i]] = zoneStates[i].on ? "ON" : "OFF";
         labels[ZONE_KEYS[i]] = ZONE_LABELS[i];
     }
-    JsonArray schedArray = doc.createNestedArray("schedules");
+    JsonArray schedArray = doc["schedules"].to<JsonArray>();
     for (const auto &entry : schedules) {
-        JsonObject sched = schedArray.createNestedObject();
+        JsonObject sched = schedArray.add<JsonObject>();
         sched["id"] = entry.id;
         sched["zone"] = ZONE_KEYS[entry.zone];
         sched["label"] = ZONE_LABELS[entry.zone];
         sched["hour"] = entry.hour;
         sched["minute"] = entry.minute;
         sched["duration_s"] = entry.durationSeconds;
-        JsonArray days = sched.createNestedArray("days");
+        JsonArray days = sched["days"].to<JsonArray>();
         daysMaskToJson(entry.daysMask, days);
     }
 
@@ -364,8 +367,9 @@ static void handleBleCommand(const std::string &payload) {
         ControlMode nextMode = currentMode;
         if (equalsIgnoreCase(modeStr, "AUTO")) {
             nextMode = MODE_AUTO;
-        } else if (equalsIgnoreCase(modeStr, "MANUAL")) {
-            nextMode = MODE_MANUAL;
+        } else if (equalsIgnoreCase(modeStr, "OFF") || equalsIgnoreCase(modeStr, "MANUAL")) {
+            // treat legacy "MANUAL" command the same as OFF (manual-only control)
+            nextMode = MODE_OFF;
         } else {
             Serial.println("Unknown mode value");
             return;
@@ -475,6 +479,25 @@ static void daysMaskToJson(uint8_t mask, JsonArray &out) {
     }
 }
 
+static bool manualOverrideActive() {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        if (zoneStates[i].manual && zoneStates[i].on) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static const char *reportedMode() {
+    if (currentMode == MODE_OFF) {
+        return "OFF";
+    }
+    if (manualOverrideActive()) {
+        return "MANUAL";
+    }
+    return "AUTO";
+}
+
 static time_t currentEpoch() {
     if (!timeSynced) {
         return 0;
@@ -522,7 +545,7 @@ static bool removeScheduleById(const String &id) {
 }
 
 static void evaluateSchedules() {
-    if (!timeSynced || schedules.empty()) {
+    if (currentMode != MODE_AUTO || !timeSynced || schedules.empty()) {
         return;
     }
     time_t now = currentEpoch();
