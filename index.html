@@ -64,6 +64,9 @@
       align-items: center;
       gap: 0.5rem;
     }
+    .mode-group.override {
+      box-shadow: 0 0 0 2px rgba(197, 48, 48, 0.25);
+    }
     .mode-pill {
       font-weight: 600;
     }
@@ -81,71 +84,78 @@
       display: grid;
       gap: 1.5rem;
     }
-    .tiles {
+    .nav {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0 0 0.5rem;
+      flex-wrap: wrap;
+    }
+    .nav-btn {
+      border: 1px solid #cbd5f5;
+      background: transparent;
+      color: inherit;
+      border-radius: 999px;
+      padding: 0.4rem 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+    .view {
+      display: none;
+    }
+    .view.active {
+      display: block;
+    }
+    .status-grid {
       display: grid;
       gap: 1rem;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     }
-    .tile {
+    .status-card {
       background: var(--surface);
       border-radius: 12px;
       padding: 1rem;
       display: flex;
       flex-direction: column;
-      gap: 0.6rem;
+      gap: 0.5rem;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      border-left: 6px solid transparent;
+      transition: border-color 0.2s ease;
     }
-    .tile[data-state="ON"] {
-      border-left: 6px solid var(--accent);
+    .status-card[data-state="ON"] {
+      border-left-color: var(--accent);
     }
-    .tile h3 {
+    .status-card h3 {
       margin: 0;
       font-size: 1.15rem;
     }
-    .state-label {
+    .status-state {
       font-weight: 600;
       font-size: 0.95rem;
     }
-    .state-label[data-state="ON"] {
+    .status-state[data-state="ON"] {
       color: var(--accent);
     }
-    .state-label[data-state="OFF"] {
+    .status-state[data-state="OFF"] {
       color: #4a5568;
     }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
+    .status-remaining {
+      font-size: 0.9rem;
+      color: #4a5568;
     }
-    .actions button {
-      flex: 1;
-      min-width: 4.5rem;
-      padding: 0.45rem 0.5rem;
-      border: none;
-      border-radius: 8px;
+    .status-override {
+      display: none;
+      font-size: 0.85rem;
+      color: var(--danger);
       font-weight: 600;
-      cursor: pointer;
-      transition: filter 0.15s ease;
     }
-    .actions button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .actions button.primary {
-      background: var(--accent);
-      color: #fff;
-    }
-    .actions button.secondary {
-      background: #e2e8f0;
-      color: #1a202c;
-    }
-    .actions button.danger {
-      background: var(--danger);
-      color: #fff;
-    }
-    .actions button:not(:disabled):hover {
-      filter: brightness(0.95);
+    .status-card.manual-active .status-override {
+      display: block;
     }
     .log {
       background: var(--surface);
@@ -176,6 +186,9 @@
       display: flex;
       flex-direction: column;
       gap: 1rem;
+    }
+    .view.scheduler.active {
+      display: flex;
     }
     .scheduler h2 {
       margin: 0;
@@ -271,9 +284,14 @@
       .mode-group {
         background: #334155;
       }
-      .actions button.secondary {
-        background: #334155;
-        color: #e2e8f0;
+      .mode-group.override {
+        box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.35);
+      }
+      .nav-btn {
+        border-color: #475569;
+      }
+      .status-card {
+        background: #1e293b;
       }
     }
   </style>
@@ -293,75 +311,52 @@
     </div>
   </header>
   <main>
-    <section class="tiles" id="tiles">
-      <div class="tile" data-zone="line1" data-state="OFF">
-        <h3>Line 1</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+    <nav class="nav">
+      <button class="nav-btn active" data-view-target="status">Status</button>
+      <button class="nav-btn" data-view-target="schedule">Schedule</button>
+      <button class="nav-btn" data-view-target="log">Events</button>
+    </nav>
+    <section class="view status-view active" data-view="status">
+      <div class="status-grid">
+        <div class="status-card" data-zone="line1" data-state="OFF">
+          <h3>Line 1</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
-      </div>
-      <div class="tile" data-zone="line2" data-state="OFF">
-        <h3>Line 2</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        <div class="status-card" data-zone="line2" data-state="OFF">
+          <h3>Line 2</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
-      </div>
-      <div class="tile" data-zone="line3" data-state="OFF">
-        <h3>Line 3</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        <div class="status-card" data-zone="line3" data-state="OFF">
+          <h3>Line 3</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
-      </div>
-      <div class="tile" data-zone="mister" data-state="OFF">
-        <h3>Mister</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        <div class="status-card" data-zone="mister" data-state="OFF">
+          <h3>Mister</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
-      </div>
-      <div class="tile" data-zone="fan" data-state="OFF">
-        <h3>Fan</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        <div class="status-card" data-zone="fan" data-state="OFF">
+          <h3>Fan</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
-      </div>
-      <div class="tile" data-zone="lights" data-state="OFF">
-        <h3>Grow Lights</h3>
-        <span class="state-label" data-state="OFF">OFF</span>
-        <div class="actions">
-          <button class="primary" data-action="on">ON</button>
-          <button class="danger" data-action="off">OFF</button>
-          <button class="secondary" data-action="pulse" data-duration="300">5m</button>
-          <button class="secondary" data-action="pulse" data-duration="600">10m</button>
-          <button class="secondary" data-action="pulse" data-duration="900">15m</button>
+        <div class="status-card" data-zone="lights" data-state="OFF">
+          <h3>Grow Lights</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Override active</div>
         </div>
       </div>
     </section>
-    <section class="scheduler">
+    <section class="view scheduler" data-view="schedule">
       <div>
         <h2>Schedules</h2>
         <p style="margin:0;color:#718096;font-size:0.9rem;">Automate zones by day and time.</p>
@@ -402,7 +397,7 @@
       </form>
       <div id="schedule-list" class="schedule-list empty">No schedules yet.</div>
     </section>
-    <section class="log">
+    <section class="view log" data-view="log">
       <h2>Event Log</h2>
       <pre id="log-output">Ready.</pre>
     </section>
@@ -442,19 +437,22 @@
     const connectBtn = document.getElementById('connect-btn');
     const modePill = document.getElementById('mode-pill');
     const modeSelect = document.getElementById('mode-select');
+    const modeGroup = document.querySelector('.mode-group');
     const logOutput = document.getElementById('log-output');
-    const tiles = Array.from(document.querySelectorAll('.tile'));
+    const statusCards = Array.from(document.querySelectorAll('.status-card'));
+    const zoneKeys = statusCards.map(card => card.getAttribute('data-zone'));
     const scheduleForm = document.getElementById('schedule-form');
     const scheduleList = document.getElementById('schedule-list');
     const scheduleZoneSelect = document.getElementById('schedule-zone');
     const scheduleTimeInput = document.getElementById('schedule-time');
     const scheduleDurationInput = document.getElementById('schedule-duration');
     const dayCheckboxes = Array.from(document.querySelectorAll('input[name="schedule-day"]'));
+    const navButtons = Array.from(document.querySelectorAll('.nav-btn'));
+    const views = Array.from(document.querySelectorAll('[data-view]'));
 
-    disableTileButtons(true);
     disableModeControl(true);
     setModeControlValue(baseMode);
-    updateTileLabels();
+    updateStatusLabels();
 
     connectBtn.addEventListener('click', async () => {
       if (device && device.gatt && device.gatt.connected) {
@@ -476,31 +474,6 @@
           setConnectButtonState('disconnected');
         }
       }
-    });
-
-    tiles.forEach(tile => {
-      tile.addEventListener('click', event => {
-        const target = event.target;
-        if (!(target instanceof HTMLButtonElement)) {
-          return;
-        }
-        if (target.disabled) {
-          return;
-        }
-        const zone = tile.getAttribute('data-zone');
-        const action = target.getAttribute('data-action');
-        if (!zone || !action) {
-          return;
-        }
-        if (action === 'on') {
-          sendSetValve(zone, 'ON');
-        } else if (action === 'off') {
-          sendSetValve(zone, 'OFF');
-        } else if (action === 'pulse') {
-          const duration = Number(target.getAttribute('data-duration') || '0');
-          sendSetValve(zone, 'ON', duration);
-        }
-      });
     });
 
     scheduleForm.addEventListener('submit', event => {
@@ -541,6 +514,30 @@
       sendDeleteSchedule(id);
     });
 
+    navButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.viewTarget;
+        if (!target) {
+          return;
+        }
+        showView(target, btn);
+      });
+    });
+
+    function showView(name, clickedButton) {
+      views.forEach(view => {
+        view.classList.toggle('active', view.dataset.view === name);
+      });
+      navButtons.forEach(btn => {
+        btn.classList.toggle('active', btn === clickedButton);
+      });
+    }
+
+    const initialNav = navButtons.find(btn => btn.classList.contains('active')) || navButtons[0];
+    if (initialNav && initialNav.dataset.viewTarget) {
+      showView(initialNav.dataset.viewTarget, initialNav);
+    }
+
     if (modeSelect) {
       modeSelect.addEventListener('change', () => {
         if (updatingModeControl) {
@@ -571,19 +568,17 @@
       await txCharacteristic.startNotifications();
       txCharacteristic.addEventListener('characteristicvaluechanged', handleNotification);
 
-      disableTileButtons(false);
       disableModeControl(false);
       setModeControlValue(baseMode);
       setConnectButtonState('connected');
       log('Subscribed to notifications.');
-      appendMode('Connecting...');
+      appendMode('Connecting...', false);
       await syncTime();
       sendPing();
     }
 
     function handleDisconnect() {
       log('Disconnected.');
-      disableTileButtons(true);
       disableModeControl(true);
       setConnectButtonState('disconnected');
       if (!reconnecting) {
@@ -602,12 +597,11 @@
         const msg = JSON.parse(json);
         if (msg.evt === 'state') {
           if (msg.mode) {
-            appendMode(msg.mode);
-          }
-          if (msg.zones) {
-            Object.entries(msg.zones).forEach(([zone, state]) => {
-              updateZoneTile(zone, state);
-            });
+            const override = Boolean(msg.overrideActive);
+            appendMode(msg.mode, override);
+            baseMode = msg.mode;
+            setModeControlValue(baseMode);
+            disableModeControl(false);
           }
           if (msg.zoneLabels) {
             applyZoneLabels(msg.zoneLabels);
@@ -616,13 +610,16 @@
             scheduleState = msg.schedules;
             renderSchedules();
           }
-          if (msg.baseMode) {
-            baseMode = msg.baseMode;
-            setModeControlValue(baseMode);
-          }
-          if (!modeSelect.disabled) {
-            disableModeControl(false);
-          }
+
+          const zoneStates = msg.zones || {};
+          const remaining = msg.remaining || {};
+          const overrides = msg.overrides || {};
+          zoneKeys.forEach(zone => {
+            const state = zoneStates[zone] || 'OFF';
+            const remainingSeconds = Number(remaining[zone] || 0);
+            const override = Boolean(overrides[zone]);
+            updateZoneCard(zone, state, remainingSeconds, override);
+          });
         } else if (msg.evt === 'pong') {
           log('Pong received.');
         }
@@ -631,34 +628,52 @@
       }
     }
 
-    function updateZoneTile(zone, state) {
-      const tile = tiles.find(t => t.getAttribute('data-zone') === zone);
-      if (!tile) {
+    function updateZoneCard(zone, state, remainingSeconds, override) {
+      const card = statusCards.find(card => card.getAttribute('data-zone') === zone);
+      if (!card) {
         return;
       }
       const normalized = state === 'ON' ? 'ON' : 'OFF';
-      tile.setAttribute('data-state', normalized);
-      const label = tile.querySelector('.state-label');
-      if (label) {
-        label.dataset.state = normalized;
-        label.textContent = normalized;
+      card.dataset.state = normalized;
+      card.classList.toggle('manual-active', override);
+
+      const stateLabel = card.querySelector('.status-state');
+      if (stateLabel) {
+        stateLabel.dataset.state = normalized;
+        stateLabel.textContent = normalized;
+      }
+
+      const remainingEl = card.querySelector('.status-remaining');
+    if (remainingEl) {
+        remainingEl.textContent = formatRemainingText(normalized, remainingSeconds, override);
+      }
+      const overrideEl = card.querySelector('.status-override');
+      if (overrideEl) {
+        overrideEl.textContent = override ? 'Override active' : '';
       }
     }
 
-    async function sendSetValve(zone, state, durationSeconds = 0) {
-      if (!rxCharacteristic) {
-        log('Not connected.');
-        return;
+    function formatRemainingText(state, remainingSeconds, override) {
+      if (state !== 'ON') {
+        return 'Timer: --';
       }
-      const payload = {
-        cmd: 'setValve',
-        zone,
-        state,
-      };
-      if (durationSeconds > 0) {
-        payload.duration_s = durationSeconds;
+      if (remainingSeconds > 0) {
+        return `Timer: ${formatDuration(remainingSeconds)}`;
       }
-      await sendJson(payload);
+      if (override) {
+        return 'Timer: latched';
+      }
+      return 'Timer: --';
+    }
+
+    function formatDuration(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const mins = Math.floor(total / 60);
+      const secs = total % 60;
+      if (mins > 0) {
+        return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+      }
+      return `${secs}s`;
     }
 
     async function sendPing() {
@@ -677,14 +692,6 @@
       } else {
         await rxCharacteristic.writeValue(data);
       }
-    }
-
-    function disableTileButtons(disabled) {
-      tiles.forEach(tile => {
-        tile.querySelectorAll('button').forEach(button => {
-          button.disabled = disabled;
-        });
-      });
     }
 
     function disableModeControl(disabled) {
@@ -721,13 +728,13 @@
 
     function applyZoneLabels(labels) {
       zoneLabels = { ...zoneLabels, ...labels };
-      updateTileLabels();
+      updateStatusLabels();
     }
 
-    function updateTileLabels() {
-      tiles.forEach(tile => {
-        const zone = tile.getAttribute('data-zone');
-        const heading = tile.querySelector('h3');
+    function updateStatusLabels() {
+      statusCards.forEach(card => {
+        const zone = card.getAttribute('data-zone');
+        const heading = card.querySelector('h3');
         if (zone && heading) {
           heading.textContent = zoneLabels[zone] || zoneDefaults[zone] || zone;
         }
@@ -756,7 +763,7 @@
             <button type="button" data-id="${entry.id}">Delete</button>
           </div>
           <div class="schedule-card-details">
-            ${time} · ${durationText} · ${daysText}
+            ${time} - ${durationText} - ${daysText}
           </div>
         `;
         scheduleList.appendChild(card);
@@ -794,8 +801,15 @@
       await sendJson({ cmd: 'setTime', epoch: epochSeconds });
     }
 
-    function appendMode(mode) {
-      modePill.textContent = `Mode: ${mode}`;
+    function appendMode(mode, overrideActive = false) {
+      if (!modePill) {
+        return;
+      }
+      const display = mode || '--';
+      modePill.textContent = overrideActive ? `Mode: ${display} (override)` : `Mode: ${display}`;
+      if (modeGroup) {
+        modeGroup.classList.toggle('override', overrideActive);
+      }
     }
 
     function log(message) {
