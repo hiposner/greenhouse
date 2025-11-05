@@ -48,6 +48,18 @@ static const char *ZONE_LABELS[Z_COUNT] = {
     "Red (Line 1)", "Green (Line 2)", "Yellow (Line 3)", "Blue (Mister)", "Fan", "Grow Lights"
 };
 
+static uint32_t defaultManualDuration(Zone zone) {
+    switch (zone) {
+    case Z_LINE1:
+    case Z_LINE2:
+    case Z_LINE3:
+    case Z_MISTER:
+        return 900; // 15 minutes
+    default:
+        return 0; // relays stay on until toggled off
+    }
+}
+
 struct ZoneState {
     bool on = false;
     bool manual = false;
@@ -103,7 +115,6 @@ static bool removeScheduleById(const String &id);
 static time_t currentEpoch();
 static void syncTime(uint32_t epochSeconds);
 static bool manualOverrideActive();
-static const char *reportedMode();
 
 static inline void IRAM_ATTR registerButtonEvent(uint8_t index) {
     uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
@@ -231,7 +242,7 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
         zoneStates[zone].manual = manual;
         uint32_t targetSeconds = durationSeconds;
         if (targetSeconds == 0 && manual) {
-            targetSeconds = DEFAULT_MANUAL_SECS;
+            targetSeconds = defaultManualDuration(zone);
         }
         uint32_t newDeadline = 0;
         if (targetSeconds > 0) {
@@ -274,18 +285,27 @@ static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 static void publishState() {
     JsonDocument doc;
     doc["evt"] = "state";
-    doc["ts"] = millis();
-    doc["mode"] = reportedMode();
-    doc["baseMode"] = modeToString(currentMode);
+    const unsigned long nowMs = millis();
+    doc["ts"] = nowMs;
+    doc["mode"] = modeToString(currentMode);
+    doc["overrideActive"] = manualOverrideActive();
     doc["timeSynced"] = timeSynced;
     if (timeSynced) {
         doc["epoch"] = static_cast<uint32_t>(currentEpoch());
     }
     JsonObject zones = doc["zones"].to<JsonObject>();
     JsonObject labels = doc["zoneLabels"].to<JsonObject>();
+    JsonObject remaining = doc["remaining"].to<JsonObject>();
+    JsonObject overrides = doc["overrides"].to<JsonObject>();
     for (size_t i = 0; i < Z_COUNT; ++i) {
         zones[ZONE_KEYS[i]] = zoneStates[i].on ? "ON" : "OFF";
         labels[ZONE_KEYS[i]] = ZONE_LABELS[i];
+        if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
+            remaining[ZONE_KEYS[i]] = (zoneStates[i].safetyUntilMs - nowMs) / 1000UL;
+        } else {
+            remaining[ZONE_KEYS[i]] = 0;
+        }
+        overrides[ZONE_KEYS[i]] = zoneStates[i].manual;
     }
     JsonArray schedArray = doc["schedules"].to<JsonArray>();
     for (const auto &entry : schedules) {
@@ -486,16 +506,6 @@ static bool manualOverrideActive() {
         }
     }
     return false;
-}
-
-static const char *reportedMode() {
-    if (currentMode == MODE_OFF) {
-        return "OFF";
-    }
-    if (manualOverrideActive()) {
-        return "MANUAL";
-    }
-    return "AUTO";
 }
 
 static time_t currentEpoch() {
