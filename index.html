@@ -432,6 +432,8 @@
     let scheduleState = [];
     let baseMode = 'AUTO';
     let updatingModeControl = false;
+    const zoneRuntime = {};
+    setInterval(updateCountdowns, 1000);
 
     const connectBtn = document.getElementById('connect-btn');
     const modePill = document.getElementById('mode-pill');
@@ -642,27 +644,56 @@
         stateLabel.textContent = normalized;
       }
 
-      const remainingEl = card.querySelector('.status-remaining');
-    if (remainingEl) {
-        remainingEl.textContent = formatRemainingText(normalized, remainingSeconds, override);
-      }
-          <div class="status-override">Automatic control</div>
+      setZoneRuntime(zone, normalized === 'ON' ? remainingSeconds : 0, override);
+      refreshZoneCountdown(zone);
+
+      const overrideEl = card.querySelector('.status-override');
       if (overrideEl) {
         overrideEl.textContent = override ? 'Manual override' : 'Automatic control';
       }
     }
 
-    function formatRemainingText(state, remainingSeconds, override) {
-      if (state !== 'ON') {
-        return 'Timer: --';
-      }
+    function setZoneRuntime(zone, remainingSeconds, override) {
       if (remainingSeconds > 0) {
-        return `Timer: ${formatDuration(remainingSeconds)}`;
+        zoneRuntime[zone] = { expiresAt: Date.now() + remainingSeconds * 1000 };
+      } else if (override) {
+        zoneRuntime[zone] = { latched: true };
+      } else {
+        delete zoneRuntime[zone];
       }
-      if (override) {
-        return 'Timer: latched';
+    }
+
+    function refreshZoneCountdown(zone) {
+      const card = statusCards.find(card => card.getAttribute('data-zone') === zone);
+      if (!card) {
+        return;
       }
-      return 'Timer: --';
+      const remainingEl = card.querySelector('.status-remaining');
+      if (!remainingEl) {
+        return;
+      }
+      const state = card.dataset.state || 'OFF';
+      const info = zoneRuntime[zone];
+      let text = 'Timer: --';
+      if (state === 'ON') {
+        if (info) {
+          if (info.latched) {
+            text = 'Timer: latched';
+          } else if (info.expiresAt) {
+            const remaining = Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000));
+            if (remaining > 0) {
+              text = `Timer: ${formatDuration(remaining)}`;
+            }
+          }
+        }
+      } else if (info && !info.latched) {
+        delete zoneRuntime[zone];
+      }
+      remainingEl.textContent = text;
+    }
+
+    function updateCountdowns() {
+      zoneKeys.forEach(zone => refreshZoneCountdown(zone));
     }
 
     function formatDuration(seconds) {
