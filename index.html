@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -148,14 +148,13 @@
       font-size: 0.9rem;
       color: #4a5568;
     }
-    .status-override {
-      display: none;
+          <div class="status-override">Automatic control</div>
       font-size: 0.85rem;
-      color: var(--danger);
       font-weight: 600;
+      color: #4a5568;
     }
-    .status-card.manual-active .status-override {
-      display: block;
+          <div class="status-override">Automatic control</div>
+      color: var(--danger);
     }
     .log {
       background: var(--surface);
@@ -322,37 +321,37 @@
           <h3>Line 1</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
         <div class="status-card" data-zone="line2" data-state="OFF">
           <h3>Line 2</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
         <div class="status-card" data-zone="line3" data-state="OFF">
           <h3>Line 3</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
         <div class="status-card" data-zone="mister" data-state="OFF">
           <h3>Mister</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
         <div class="status-card" data-zone="fan" data-state="OFF">
           <h3>Fan</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
         <div class="status-card" data-zone="lights" data-state="OFF">
           <h3>Grow Lights</h3>
           <div class="status-state" data-state="OFF">OFF</div>
           <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Override active</div>
+          <div class="status-override">Automatic control</div>
         </div>
       </div>
     </section>
@@ -647,9 +646,9 @@
     if (remainingEl) {
         remainingEl.textContent = formatRemainingText(normalized, remainingSeconds, override);
       }
-      const overrideEl = card.querySelector('.status-override');
+          <div class="status-override">Automatic control</div>
       if (overrideEl) {
-        overrideEl.textContent = override ? 'Override active' : '';
+        overrideEl.textContent = override ? 'Manual override' : 'Automatic control';
       }
     }
 
