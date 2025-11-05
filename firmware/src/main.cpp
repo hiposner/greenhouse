@@ -1,4 +1,4 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
 #include <ctype.h>
@@ -64,12 +64,12 @@ struct ZoneState {
     bool on = false;
     bool manual = false;
     uint32_t safetyUntilMs = 0;
+    bool buttonStableState = true;
+    bool buttonLastReading = true;
+    unsigned long lastButtonChangeMs = 0;
 };
 
 static ZoneState zoneStates[Z_COUNT];
-static volatile bool buttonPending[Z_COUNT] = {false};
-static volatile uint32_t buttonLastIsrMs[Z_COUNT] = {0};
-static portMUX_TYPE buttonMux = portMUX_INITIALIZER_UNLOCKED;
 
 static NimBLEServer *bleServer = nullptr;
 static NimBLECharacteristic *txCharacteristic = nullptr;
@@ -106,7 +106,7 @@ static void digitalWriteActive(uint8_t pin, bool on);
 static bool parseZoneKey(const char *key, Zone &zone);
 static const char *modeToString(ControlMode mode);
 static bool equalsIgnoreCase(const char *a, const char *b);
-static bool takeButtonPending(size_t index);
+static void pollZoneButtons(unsigned long now);
 static bool parseDaysMask(const JsonVariantConst &value, uint8_t &mask);
 static void daysMaskToJson(uint8_t mask, JsonArray &out);
 static void evaluateSchedules();
@@ -115,23 +115,6 @@ static bool removeScheduleById(const String &id);
 static time_t currentEpoch();
 static void syncTime(uint32_t epochSeconds);
 static bool manualOverrideActive();
-
-static inline void IRAM_ATTR registerButtonEvent(uint8_t index) {
-    uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
-    portENTER_CRITICAL_ISR(&buttonMux);
-    if ((now - buttonLastIsrMs[index]) >= BTN_DEBOUNCE_MS) {
-        buttonLastIsrMs[index] = now;
-        buttonPending[index] = true;
-    }
-    portEXIT_CRITICAL_ISR(&buttonMux);
-}
-
-static void IRAM_ATTR onButtonLine1() { registerButtonEvent(Z_LINE1); }
-static void IRAM_ATTR onButtonLine2() { registerButtonEvent(Z_LINE2); }
-static void IRAM_ATTR onButtonLine3() { registerButtonEvent(Z_LINE3); }
-static void IRAM_ATTR onButtonMister() { registerButtonEvent(Z_MISTER); }
-static void IRAM_ATTR onButtonFan() { registerButtonEvent(Z_FAN); }
-static void IRAM_ATTR onButtonLights() { registerButtonEvent(Z_LIGHTS); }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override {
@@ -267,17 +250,6 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
         publishState();
     }
     return stateChanged;
-}
-
-static bool takeButtonPending(size_t index) {
-    bool pending = false;
-    portENTER_CRITICAL(&buttonMux);
-    if (buttonPending[index]) {
-        pending = true;
-        buttonPending[index] = false;
-    }
-    portEXIT_CRITICAL(&buttonMux);
-    return pending;
 }
 
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -508,6 +480,27 @@ static bool manualOverrideActive() {
     return false;
 }
 
+static void pollZoneButtons(unsigned long now) {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        ZoneState &state = zoneStates[i];
+        bool reading = digitalRead(ZONE_BUTTON_PINS[i]);
+        if (reading != state.buttonLastReading) {
+            state.buttonLastReading = reading;
+            state.lastButtonChangeMs = now;
+        }
+        if ((now - state.lastButtonChangeMs) >= BTN_DEBOUNCE_MS) {
+            if (reading != state.buttonStableState) {
+                state.buttonStableState = reading;
+                if (!reading) { // active low
+                    bool turnOn = !state.on;
+                    Serial.printf("Button toggle for %s -> %s\n", ZONE_KEYS[i], turnOn ? "ON" : "OFF");
+                    setZone(static_cast<Zone>(i), turnOn, 0, true);
+                }
+            }
+        }
+    }
+}
+
 static time_t currentEpoch() {
     if (!timeSynced) {
         return 0;
@@ -599,18 +592,16 @@ void setup() {
     Serial.println();
     Serial.println("Greenhouse controller firmware booting");
 
+    unsigned long now = millis();
     for (size_t i = 0; i < Z_COUNT; ++i) {
         pinMode(ZONE_OUTPUT_PINS[i], OUTPUT);
         digitalWriteActive(ZONE_OUTPUT_PINS[i], false);
         pinMode(ZONE_BUTTON_PINS[i], INPUT_PULLUP);
+        bool reading = digitalRead(ZONE_BUTTON_PINS[i]);
+        zoneStates[i].buttonStableState = reading;
+        zoneStates[i].buttonLastReading = reading;
+        zoneStates[i].lastButtonChangeMs = now;
     }
-
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_LINE1]), onButtonLine1, FALLING);
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_LINE2]), onButtonLine2, FALLING);
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_LINE3]), onButtonLine3, FALLING);
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_MISTER]), onButtonMister, FALLING);
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_FAN]), onButtonFan, FALLING);
-    attachInterrupt(digitalPinToInterrupt(ZONE_BUTTON_PINS[Z_LIGHTS]), onButtonLights, FALLING);
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
@@ -646,13 +637,7 @@ void loop() {
 
     evaluateSchedules();
 
-    for (size_t i = 0; i < Z_COUNT; ++i) {
-        if (takeButtonPending(i)) {
-            bool turnOn = !zoneStates[i].on;
-            Serial.printf("Button toggle for %s -> %s\n", ZONE_KEYS[i], turnOn ? "ON" : "OFF");
-            setZone(static_cast<Zone>(i), turnOn, 0, true);
-        }
-    }
+    pollZoneButtons(now);
 
     delay(10);
 }
