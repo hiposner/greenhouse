@@ -592,6 +592,9 @@ void setup() {
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+    // Increase MTU/data length so state JSON notifications are not truncated.
+    NimBLEDevice::setMTU(185);
+    NimBLEDevice::setDataLen(251);
     bleServer = NimBLEDevice::createServer();
     bleServer->setCallbacks(&serverCallbacks);
 
