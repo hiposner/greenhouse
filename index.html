@@ -5,13 +5,14 @@
   <title>Greenhouse Control</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="manifest" href="manifest.json">
+  <!-- UI cleanup: compact nav pills and removed mode override badge -->
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f5f7fa;
-      --surface: #ffffff;
-      --accent: #2f855a;
-      --accent-dark: #276749;
+      --bg: #ffffff;
+      --surface: #bcecb6;
+      --accent: #105031;
+      --accent-dark: #2a5a43;
       --danger: #c53030;
       --text: #1a202c;
       font-family: "Segoe UI", Roboto, sans-serif;
@@ -64,12 +65,6 @@
       align-items: center;
       gap: 0.5rem;
     }
-    .mode-group.override {
-      box-shadow: 0 0 0 2px rgba(197, 48, 48, 0.25);
-    }
-    .mode-pill {
-      font-weight: 600;
-    }
     .mode-select {
       padding: 0.2rem 0.6rem;
       border-radius: 10px;
@@ -91,12 +86,18 @@
       flex-wrap: wrap;
     }
     .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       border: 1px solid #cbd5f5;
       background: transparent;
       color: inherit;
       border-radius: 999px;
-      padding: 0.4rem 1rem;
+      height: 34px;
+      padding: 0 0.85rem;
       font-weight: 600;
+      font-size: 0.95rem;
+      line-height: 1;
       cursor: pointer;
       transition: background 0.15s ease, color 0.15s ease;
     }
@@ -300,7 +301,6 @@
     <h1>Greenhouse Control</h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
-        <span class="mode-pill" id="mode-pill">Mode: --</span>
         <select class="mode-select" id="mode-select" disabled>
           <option value="AUTO">Auto</option>
           <option value="OFF">Off (manual only)</option>
@@ -436,9 +436,7 @@
     setInterval(updateCountdowns, 1000);
 
     const connectBtn = document.getElementById('connect-btn');
-    const modePill = document.getElementById('mode-pill');
     const modeSelect = document.getElementById('mode-select');
-    const modeGroup = document.querySelector('.mode-group');
     const logOutput = document.getElementById('log-output');
     const statusCards = Array.from(document.querySelectorAll('.status-card'));
     const zoneKeys = statusCards.map(card => card.getAttribute('data-zone'));
@@ -559,6 +557,7 @@
         log('No Bluetooth device selected.');
         return;
       }
+      setConnectButtonState('connecting');
       log('Connecting to GATT server...');
       server = await device.gatt.connect();
       log('Connected, discovering services...');
@@ -573,7 +572,6 @@
       setModeControlValue(baseMode);
       setConnectButtonState('connected');
       log('Subscribed to notifications.');
-      appendMode('Connecting...', false);
       await syncTime();
       sendPing();
     }
@@ -582,9 +580,6 @@
       log('Disconnected.');
       disableModeControl(true);
       setConnectButtonState('disconnected');
-      if (!reconnecting) {
-        appendMode('--');
-      }
     }
 
     function handleNotification(event) {
@@ -598,8 +593,6 @@
         const msg = JSON.parse(json);
         if (msg.evt === 'state') {
           if (msg.mode) {
-            const override = Boolean(msg.overrideActive);
-            appendMode(msg.mode, override);
             baseMode = msg.mode;
             setModeControlValue(baseMode);
             disableModeControl(false);
@@ -682,7 +675,7 @@
           } else if (info.expiresAt) {
             const remaining = Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000));
             if (remaining > 0) {
-              text = `Timer: ${formatDuration(remaining)}`;
+              text = `${remaining}s`;
             }
           }
         }
@@ -694,16 +687,6 @@
 
     function updateCountdowns() {
       zoneKeys.forEach(zone => refreshZoneCountdown(zone));
-    }
-
-    function formatDuration(seconds) {
-      const total = Math.max(0, Math.floor(Number(seconds) || 0));
-      const mins = Math.floor(total / 60);
-      const secs = total % 60;
-      if (mins > 0) {
-        return `${mins}m ${secs.toString().padStart(2, '0')}s`;
-      }
-      return `${secs}s`;
     }
 
     async function sendPing() {
@@ -783,9 +766,8 @@
         const card = document.createElement('div');
         card.className = 'schedule-card';
         const label = zoneLabels[entry.zone] || zoneDefaults[entry.zone] || entry.zone;
-        const time = formatTime(entry.hour, entry.minute);
-        const durationMinutes = (entry.duration_s || 0) / 60;
-        const durationText = durationMinutes >= 1 ? `${durationMinutes.toFixed(1)} min` : `${entry.duration_s} s`;
+        const time = `${String(entry.hour).padStart(2, '0')}:${String(entry.minute).padStart(2, '0')}`;
+        const durationText = `${entry.duration_s} sec`;
         const daysText = Array.isArray(entry.days) && entry.days.length ? entry.days.join(', ') : 'Daily';
         card.innerHTML = `
           <div class="schedule-card-header">
@@ -798,17 +780,6 @@
         `;
         scheduleList.appendChild(card);
       });
-    }
-
-    function formatTime(hour, minute) {
-      const h = Number(hour);
-      const m = Number(minute);
-      if (Number.isNaN(h) || Number.isNaN(m)) {
-        return '--:--';
-      }
-      const period = h >= 12 ? 'PM' : 'AM';
-      const hour12 = h % 12 === 0 ? 12 : h % 12;
-      return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
     }
 
     async function sendSetSchedule(schedule) {
@@ -829,17 +800,6 @@
     async function syncTime() {
       const epochSeconds = Math.floor(Date.now() / 1000);
       await sendJson({ cmd: 'setTime', epoch: epochSeconds });
-    }
-
-    function appendMode(mode, overrideActive = false) {
-      if (!modePill) {
-        return;
-      }
-      const display = mode || '--';
-      modePill.textContent = overrideActive ? `Mode: ${display} (override)` : `Mode: ${display}`;
-      if (modeGroup) {
-        modeGroup.classList.toggle('override', overrideActive);
-      }
     }
 
     function log(message) {
