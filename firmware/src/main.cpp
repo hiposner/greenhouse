@@ -242,8 +242,8 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 static void publishState() {
-    // Larger document + serialisation to string to avoid truncated JSON notifications.
-    StaticJsonDocument<1024> doc;
+    // Compact state payload to stay well under BLE MTU; schedules/labels omitted.
+    StaticJsonDocument<512> doc;
     doc["evt"] = "state";
     const unsigned long nowMs = millis();
     doc["ts"] = nowMs;
@@ -266,34 +266,6 @@ static void publishState() {
         overrides[ZONE_KEYS[i]] = zoneStates[i].manual;
     }
 
-    // Add labels only if payload stays small enough.
-    if (measureJson(doc) < 160) {
-        JsonObject labels = doc.createNestedObject("zoneLabels");
-        for (size_t i = 0; i < Z_COUNT; ++i) {
-            labels[ZONE_KEYS[i]] = ZONE_LABELS[i];
-        }
-    }
-
-    // Add schedules if there's room; otherwise skip to keep notifications under MTU.
-    if (!schedules.empty()) {
-        doc.createNestedArray("schedules");
-        JsonArray schedArray = doc["schedules"].as<JsonArray>();
-        for (const auto &entry : schedules) {
-            JsonObject sched = schedArray.add<JsonObject>();
-            sched["id"] = entry.id;
-            sched["zone"] = ZONE_KEYS[entry.zone];
-            sched["label"] = ZONE_LABELS[entry.zone];
-            sched["hour"] = entry.hour;
-            sched["minute"] = entry.minute;
-            sched["duration_s"] = entry.durationSeconds;
-            JsonArray days = sched["days"].to<JsonArray>();
-            daysMaskToJson(entry.daysMask, days);
-        }
-        if (measureJson(doc) > 180) {
-            doc.remove("schedules");
-        }
-    }
-
     std::string payload;
     serializeJson(doc, payload);
 
@@ -307,7 +279,7 @@ static void publishState() {
 }
 
 static void publishPong() {
-    JsonDocument doc;
+    StaticJsonDocument<64> doc;
     doc["evt"] = "pong";
     doc["ts"] = millis();
     char buffer[96];
