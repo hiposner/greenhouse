@@ -243,7 +243,7 @@ static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 
 static void publishState() {
     // Larger document + serialisation to string to avoid truncated JSON notifications.
-    StaticJsonDocument<4096> doc;
+    StaticJsonDocument<1024> doc;
     doc["evt"] = "state";
     const unsigned long nowMs = millis();
     doc["ts"] = nowMs;
@@ -253,13 +253,11 @@ static void publishState() {
     if (timeSynced) {
         doc["epoch"] = static_cast<uint32_t>(currentEpoch());
     }
-    JsonObject zones = doc["zones"].to<JsonObject>();
-    JsonObject labels = doc["zoneLabels"].to<JsonObject>();
-    JsonObject remaining = doc["remaining"].to<JsonObject>();
-    JsonObject overrides = doc["overrides"].to<JsonObject>();
+    JsonObject zones = doc.createNestedObject("zones");
+    JsonObject remaining = doc.createNestedObject("remaining");
+    JsonObject overrides = doc.createNestedObject("overrides");
     for (size_t i = 0; i < Z_COUNT; ++i) {
         zones[ZONE_KEYS[i]] = zoneStates[i].on ? "ON" : "OFF";
-        labels[ZONE_KEYS[i]] = ZONE_LABELS[i];
         if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
             remaining[ZONE_KEYS[i]] = (zoneStates[i].safetyUntilMs - nowMs) / 1000UL;
         } else {
@@ -267,17 +265,33 @@ static void publishState() {
         }
         overrides[ZONE_KEYS[i]] = zoneStates[i].manual;
     }
-    JsonArray schedArray = doc["schedules"].to<JsonArray>();
-    for (const auto &entry : schedules) {
-        JsonObject sched = schedArray.add<JsonObject>();
-        sched["id"] = entry.id;
-        sched["zone"] = ZONE_KEYS[entry.zone];
-        sched["label"] = ZONE_LABELS[entry.zone];
-        sched["hour"] = entry.hour;
-        sched["minute"] = entry.minute;
-        sched["duration_s"] = entry.durationSeconds;
-        JsonArray days = sched["days"].to<JsonArray>();
-        daysMaskToJson(entry.daysMask, days);
+
+    // Add labels only if payload stays small enough.
+    if (measureJson(doc) < 160) {
+        JsonObject labels = doc.createNestedObject("zoneLabels");
+        for (size_t i = 0; i < Z_COUNT; ++i) {
+            labels[ZONE_KEYS[i]] = ZONE_LABELS[i];
+        }
+    }
+
+    // Add schedules if there's room; otherwise skip to keep notifications under MTU.
+    if (!schedules.empty()) {
+        doc.createNestedArray("schedules");
+        JsonArray schedArray = doc["schedules"].as<JsonArray>();
+        for (const auto &entry : schedules) {
+            JsonObject sched = schedArray.add<JsonObject>();
+            sched["id"] = entry.id;
+            sched["zone"] = ZONE_KEYS[entry.zone];
+            sched["label"] = ZONE_LABELS[entry.zone];
+            sched["hour"] = entry.hour;
+            sched["minute"] = entry.minute;
+            sched["duration_s"] = entry.durationSeconds;
+            JsonArray days = sched["days"].to<JsonArray>();
+            daysMaskToJson(entry.daysMask, days);
+        }
+        if (measureJson(doc) > 180) {
+            doc.remove("schedules");
+        }
     }
 
     std::string payload;
