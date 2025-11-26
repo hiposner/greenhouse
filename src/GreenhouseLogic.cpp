@@ -352,102 +352,20 @@ void GreenhouseController::setDisplayStatus(const String &status) {
 }
 
 void GreenhouseController::initialiseNetwork() {
-    const char *staSsid = "chicken24";
-    const char *staPass = "1d0ntkn0w";
-    const char *apSsid = "greenhouse";
-    const char *apPass = "1d0ntkn0w";
-
+    // Wi-Fi is intentionally disabled; remove network credentials and avoid STA/AP setup.
     WiFi.persistent(false);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(staSsid, staPass);
-    setDisplayStatus(F("Connecting WiFi..."));
-
-    unsigned long start = millis();
-    unsigned long lastUpdate = 0;
-    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 25000UL) {
-        unsigned long elapsed = (millis() - start) / 1000UL;
-        if (millis() - lastUpdate >= 500UL) {
-            setDisplayStatus(String(F("STA connect ")) + String(elapsed) + F("s"));
-            lastUpdate = millis();
-        }
-        delay(100);
-        yield();
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        IPAddress ip = WiFi.localIP();
-        String label = ip.toString();
-        setDisplayStatus(String(F("WEB ")) + label);
-        Serial.print(F("[WiFi] Connected to "));
-        Serial.print(staSsid);
-        Serial.print(F(" IP: "));
-        Serial.println(label);
-    } else {
-        setDisplayStatus(F("STA failed -> AP"));
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_AP);
-        if (WiFi.softAP(apSsid, apPass)) {
-            delay(100);
-            IPAddress ip = WiFi.softAPIP();
-            String label = ip.toString();
-            setDisplayStatus(String(F("AP  ")) + label);
-            Serial.print(F("[WiFi] Started AP "));
-            Serial.print(apSsid);
-            Serial.print(F(" IP: "));
-            Serial.println(label);
-        } else {
-            Serial.println(F("[WiFi] Failed to start access point"));
-            setDisplayStatus(F("AP start failed"));
-        }
-    }
+    WiFi.mode(WIFI_OFF);
+    setDisplayStatus(F("WiFi disabled"));
+    Serial.println(F("[WiFi] Networking disabled"));
 }
 
 void GreenhouseController::setupWebServer() {
-    server_.on("/", HTTP_GET, [this]() {
-        this->sendRootPage(String());
-    });
-
-    server_.on("/update", HTTP_POST, [this]() {
-        bool changed = false;
-        for (size_t i = 0; i < fanRuntime_.size(); ++i) {
-            const String onKey = String(F("fan")) + String(i + 1) + F("_on");
-            const String offKey = String(F("fan")) + String(i + 1) + F("_off");
-            float onValue = fanRuntime_[i].temperatureOnF;
-            float offValue = fanRuntime_[i].temperatureOffF;
-            bool provided = false;
-            if (server_.hasArg(onKey)) {
-                onValue = server_.arg(onKey).toFloat();
-                provided = true;
-            }
-            if (server_.hasArg(offKey)) {
-                offValue = server_.arg(offKey).toFloat();
-                provided = true;
-            }
-            if (provided) {
-                setFanThreshold(i, onValue, offValue);
-                changed = true;
-            }
-        }
-
-        if (server_.hasArg("climate_min")) {
-            float value = server_.arg("climate_min").toFloat();
-            setClimateHoldMinTempF(value);
-            changed = true;
-        }
-
-        sendRootPage(changed ? F("Settings updated.") : F("No changes detected."));
-    });
-
-    server_.onNotFound([this]() {
-        server_.send(404, "text/plain", "Not Found");
-    });
-
-    server_.begin();
-    Serial.println(F("[HTTP] Web server started on port 80"));
+    // Web server disabled alongside Wi-Fi; keep stub to avoid network usage.
+    Serial.println(F("[HTTP] Web server disabled"));
 }
 
 void GreenhouseController::handleWebServer() {
-    server_.handleClient();
+    // No-op while networking is disabled.
 }
 
 void GreenhouseController::sendRootPage(const String &statusMessage) {

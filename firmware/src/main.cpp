@@ -199,21 +199,7 @@ static void applyZoneOutput(Zone zone, bool on) {
 static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
     bool stateChanged = false;
     unsigned long now = millis();
-
-    if (on && zone <= Z_LINE3 && MAX_CONCURRENT_VALVES == 1) {
-        for (int i = Z_LINE1; i <= Z_LINE3; ++i) {
-            if (i == zone) {
-                continue;
-            }
-            if (zoneStates[i].on) {
-                Serial.printf("Interlock: turning OFF %s before enabling %s\n", ZONE_KEYS[i], ZONE_KEYS[zone]);
-                applyZoneOutput(static_cast<Zone>(i), false);
-                zoneStates[i].manual = false;
-                zoneStates[i].safetyUntilMs = 0;
-                stateChanged = true;
-            }
-        }
-    }
+    // Interlock removed: multiple irrigation lines may run simultaneously.
 
     if (zoneStates[zone].on != on) {
         Serial.printf("Zone %s -> %s\n", ZONE_KEYS[zone], on ? "ON" : "OFF");

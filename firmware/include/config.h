@@ -5,7 +5,7 @@
 // Hardware constants
 #define OUTPUT_ACTIVE_LOW 1
 #define DEFAULT_MANUAL_SECS 900
-#define MAX_CONCURRENT_VALVES 4
+// Interlock removed: multiple valves can now run together.
 #define BLE_DEVICE_NAME "GreenhouseControl"
 #define BTN_DEBOUNCE_MS 60
 
