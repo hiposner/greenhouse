@@ -1,0 +1,26 @@
+{
+  "schedules": [
+    {
+      "id": "morning-line1",
+      "zone": "line1",
+      "time": "06:00",
+      "duration_s": 300,
+      "days": ["Mon", "Wed", "Fri"]
+    },
+    {
+      "id": "afternoon-line2",
+      "zone": "line2",
+      "time": "15:30",
+      "duration_s": 240,
+      "days": ["Tue", "Thu"]
+    },
+    {
+      "id": "evening-mister",
+      "zone": "mister",
+      "time": "19:00",
+      "duration_s": 120,
+      "days": ["Daily"]
+    }
+  ],
+  "notes": "Schedules are illustrative; firmware does not yet execute them."
+}
