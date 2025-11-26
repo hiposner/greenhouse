@@ -242,8 +242,8 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 static void publishState() {
-    // Larger document + dynamic serialisation to avoid truncated JSON notifications.
-    JsonDocument doc(4096);
+    // Larger document + serialisation to string to avoid truncated JSON notifications.
+    StaticJsonDocument<4096> doc;
     doc["evt"] = "state";
     const unsigned long nowMs = millis();
     doc["ts"] = nowMs;
