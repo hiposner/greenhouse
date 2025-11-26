@@ -242,28 +242,25 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 static void publishState() {
-    // Compact state payload to stay well under BLE MTU; schedules/labels omitted.
-    StaticJsonDocument<512> doc;
-    doc["evt"] = "state";
+    // Compact state payload (arrays) to stay under conservative MTU limits.
+    StaticJsonDocument<256> doc;
     const unsigned long nowMs = millis();
-    doc["ts"] = nowMs;
-    doc["mode"] = modeToString(currentMode);
-    doc["overrideActive"] = manualOverrideActive();
-    doc["timeSynced"] = timeSynced;
-    if (timeSynced) {
-        doc["epoch"] = static_cast<uint32_t>(currentEpoch());
-    }
-    JsonObject zones = doc.createNestedObject("zones");
-    JsonObject remaining = doc.createNestedObject("remaining");
-    JsonObject overrides = doc.createNestedObject("overrides");
+    doc["e"] = "s"; // event: state
+    doc["m"] = (currentMode == MODE_AUTO) ? 1 : 0; // mode: 1=auto,0=off
+    doc["o"] = manualOverrideActive() ? 1 : 0;     // any manual override active
+    doc["t"] = nowMs;                              // timestamp
+
+    JsonArray states = doc.createNestedArray("z"); // zone states
+    JsonArray remaining = doc.createNestedArray("r");
+    JsonArray overrides = doc.createNestedArray("v");
     for (size_t i = 0; i < Z_COUNT; ++i) {
-        zones[ZONE_KEYS[i]] = zoneStates[i].on ? "ON" : "OFF";
+        states.add(zoneStates[i].on ? 1 : 0);
         if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
-            remaining[ZONE_KEYS[i]] = (zoneStates[i].safetyUntilMs - nowMs) / 1000UL;
+            remaining.add((zoneStates[i].safetyUntilMs - nowMs) / 1000UL);
         } else {
-            remaining[ZONE_KEYS[i]] = 0;
+            remaining.add(0);
         }
-        overrides[ZONE_KEYS[i]] = zoneStates[i].manual;
+        overrides.add(zoneStates[i].manual ? 1 : 0);
     }
 
     std::string payload;

@@ -591,7 +591,9 @@
       log(`RX ${json}`);
       try {
         const msg = JSON.parse(json);
-        if (msg.evt === 'state') {
+        if (msg.e === 's') {
+          applyCompactState(msg);
+        } else if (msg.evt === 'state') {
           if (msg.mode) {
             baseMode = msg.mode;
             setModeControlValue(baseMode);
@@ -751,6 +753,23 @@
         if (zone && heading) {
           heading.textContent = zoneLabels[zone] || zoneDefaults[zone] || zone;
         }
+      });
+    }
+
+    function applyCompactState(msg) {
+      const zones = Array.isArray(msg.z) ? msg.z : [];
+      const remaining = Array.isArray(msg.r) ? msg.r : [];
+      const overrides = Array.isArray(msg.v) ? msg.v : [];
+      if (typeof msg.m === 'number') {
+        baseMode = msg.m === 1 ? 'AUTO' : 'OFF';
+        setModeControlValue(baseMode);
+        disableModeControl(false);
+      }
+      zoneKeys.forEach((zone, idx) => {
+        const state = zones[idx] === 1 ? 'ON' : 'OFF';
+        const remainingSeconds = Number(remaining[idx] || 0);
+        const override = Boolean(overrides[idx]);
+        updateZoneCard(zone, state, remainingSeconds, override);
       });
     }
 
