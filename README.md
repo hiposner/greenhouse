@@ -11,10 +11,9 @@ greenhouse-controller/
 |   `-- data/
 |       |-- settings.json
 |       `-- schedules.json
-`-- app/                      # Static PWA (Web Bluetooth dashboard)
-    |-- public/index.html
-    |-- public/manifest.json
-    `-- package.json
+|-- index.html                # Static PWA (Web Bluetooth dashboard)
+|-- manifest.json
+`-- sw.js
 ```
 
 ## Hardware Wiring
@@ -55,7 +54,7 @@ Key behaviour:
 - Six zones: three irrigation lines (Red/Green/Yellow for Lines 1/2/3), mister (Blue), fan, and grow lights.
 - Active-low outputs (`LOW` energises the driver).
 - Manual buttons run solenoids for 15 minutes (fan/lights latch until pressed again) with 60 ms debounce.
-- Interlock ensures only one irrigation line (Line1/Line2/Line3) is active at a time.
+- Interlock removed: irrigation lines can run concurrently.
 - Built-in scheduler per zone with phone-driven time sync (BLE `setTime` command).
 - BLE service `6e400001-b5a3-f393-e0a9-e50e24dcca9e` (Nordic UART profile).
 - JSON commands/events (examples below):
@@ -66,16 +65,17 @@ Configuration defaults live in `include/config.h`; editable data stubs are in `d
 
 ## Web App (PWA)
 
-The PWA is a static site served from `app/public`. It works offline via the manifest and runs entirely in-browser.
+The PWA is a static site served from the repository root. It works offline via the manifest and runs entirely in-browser.
 
 ### Development server
 
+From the repo root:
+
 ```
-cd app
-npm run start
+python3 -m http.server 5173
 ```
 
-This launches `python3 -m http.server 5173 -d public` for quick testing. You can also open `public/index.html` directly without a server.
+You can also open `index.html` directly without a server.
 
 - Connect via Web Bluetooth (Chrome / Edge / Android).
 - Dashboard shows each zone's state and a countdown or "latched" badge when it's running.
@@ -86,7 +86,7 @@ This launches `python3 -m http.server 5173 -d public` for quick testing. You can
 
 ### Install the PWA
 
-1. Host `app/public` once from any HTTPS origin (GitHub Pages, Netlify, etc.) and open it in Chrome/Edge on the phone.
+1. Host the repository root once from any HTTPS origin (GitHub Pages, Netlify, etc.) and open it in Chrome/Edge on the phone.
 2. After the service worker registers, use the browser menu -> **Install app** (or "Add to Home Screen").
 3. From then on you can launch the installed shortcut offline inside the greenhouse; it loads from cache and immediately prompts for the BLE connection.
 
@@ -95,7 +95,7 @@ This launches `python3 -m http.server 5173 -d public` for quick testing. You can
 - The PWA automatically calls `{"cmd":"setTime","epoch":...}` on connect so the ESP32 tracks real time using the phone/desktop clock.
 - From the Schedule tab you can add/delete entries (zone, time, duration, days). Entries sync to the ESP32 and run even if the phone disconnects.
 - Delete schedules with the in-app button; the controller stores up to 16 entries in memory.
-- Manual controls still respect the irrigation interlock and safety timers even when scheduled runs are active.
+- Manual controls still respect safety timers even when scheduled runs are active.
 - Modes:
   - **Auto** keeps schedules active; the UI flags manual overrides while physical buttons are running.
   - **Off** disables schedules so only manual inputs (physical buttons or BLE commands) can run equipment.
@@ -115,7 +115,7 @@ This launches `python3 -m http.server 5173 -d public` for quick testing. You can
 - [ ] ON/OFF/Quick timer buttons send commands and toggle drivers.
 - [ ] Manual buttons mirror the UI via BLE notifications.
 - [ ] Safety timer (180 s default) turns zones off if no duration supplied.
-- [ ] Interlock prevents more than one irrigation valve from running.
+- [ ] Multiple valves can be run together (interlock removed).
 - [ ] `{"cmd":"ping"}` returns `{"evt":"pong"}`.
 - [ ] Manual override buttons energise solenoids for 15 minutes and relays until toggled off.
 - [ ] Scheduler entries created in the PWA sync to the ESP32 and execute at the programmed times.
