@@ -3,6 +3,7 @@
 #include <NimBLEDevice.h>
 #include <ctype.h>
 #include <time.h>
+#include <string>
 #include <vector>
 
 #include "config.h"
@@ -241,7 +242,8 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 static void publishState() {
-    JsonDocument doc;
+    // Larger document + dynamic serialisation to avoid truncated JSON notifications.
+    DynamicJsonDocument doc(4096);
     doc["evt"] = "state";
     const unsigned long nowMs = millis();
     doc["ts"] = nowMs;
@@ -278,17 +280,16 @@ static void publishState() {
         daysMaskToJson(entry.daysMask, days);
     }
 
-    char buffer[512];
-    size_t len = serializeJson(doc, buffer, sizeof(buffer));
+    std::string payload;
+    serializeJson(doc, payload);
 
     if (bleConnected && txCharacteristic != nullptr) {
-        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(buffer), len);
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
         txCharacteristic->notify();
     }
 
     Serial.print("State event: ");
-    Serial.write(buffer, len);
-    Serial.println();
+    Serial.println(payload.c_str());
 }
 
 static void publishPong() {
