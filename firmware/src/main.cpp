@@ -243,7 +243,7 @@ static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 
 static void publishState() {
     // Larger document + dynamic serialisation to avoid truncated JSON notifications.
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc(4096);
     doc["evt"] = "state";
     const unsigned long nowMs = millis();
     doc["ts"] = nowMs;
@@ -594,7 +594,6 @@ void setup() {
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     // Increase MTU/data length so state JSON notifications are not truncated.
     NimBLEDevice::setMTU(185);
-    NimBLEDevice::setDataLen(251);
     bleServer = NimBLEDevice::createServer();
     bleServer->setCallbacks(&serverCallbacks);
 
