@@ -1,4 +1,4 @@
-const CACHE_NAME = 'greenhouse-control-v5';
+const CACHE_NAME = 'greenhouse-control-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -30,6 +30,13 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') {
     return;
   }
+
+  // Always try network-first for navigations (HTML) so updates land without manual cache bumps.
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then(cached => {
       if (cached) {
@@ -49,3 +56,19 @@ self.addEventListener('fetch', event => {
     })
   );
 });
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, response.clone());
+    return response;
+  } catch (error) {
+    const cached = await caches.match(request);
+    if (cached) {
+      return cached;
+    }
+    // Fallback to the app shell.
+    return caches.match('./index.html');
+  }
+}
