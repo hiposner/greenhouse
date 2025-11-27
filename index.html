@@ -323,6 +323,79 @@
       color: #374151;
       font-style: italic;
     }
+    .logic {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 0.5rem 0.75rem 0.75rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .logic h2 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+    .logic-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.6rem;
+      align-items: end;
+    }
+    .logic-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+    }
+    .logic-form input,
+    .logic-form select {
+      padding: 0.4rem;
+      border-radius: 6px;
+      border: 1px solid #cbd5f5;
+      font-size: 0.95rem;
+      background: transparent;
+      color: inherit;
+    }
+    .logic-form button {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .logic-rules {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .logic-rule-card {
+      border: 1px solid #cbd5f5;
+      border-radius: 10px;
+      padding: 0.6rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.95rem;
+      color: #1f2937;
+    }
+    .logic-rule-card button {
+      border: none;
+      background: var(--danger);
+      color: #fff;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+    }
+    .device-mode-select {
+      font-size: 0.85rem;
+      padding: 0.2rem 0.4rem;
+      border-radius: 6px;
+      border: 1px solid #cbd5f5;
+      background: transparent;
+      color: inherit;
+    }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #0f172a;
@@ -349,7 +422,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v14</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v15</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -364,6 +437,7 @@
     <nav class="nav">
       <button class="nav-btn active" data-view-target="status">Status</button>
       <button class="nav-btn" data-view-target="schedule">Schedule</button>
+      <button class="nav-btn" data-view-target="logic">Logic</button>
       <button class="nav-btn" data-view-target="log">Events</button>
     </nav>
     <div class="clock-bar">
@@ -374,40 +448,82 @@
       <div class="status-grid">
         <div class="status-card" data-zone="line1" data-state="OFF">
           <h3>Line 1</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
-        <div class="status-card" data-zone="line2" data-state="OFF">
-          <h3>Line 2</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
-        <div class="status-card" data-zone="line3" data-state="OFF">
-          <h3>Line 3</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
-        <div class="status-card" data-zone="mister" data-state="OFF">
-          <h3>Mister</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
-        <div class="status-card" data-zone="fan" data-state="OFF">
-          <h3>Fan</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
-        <div class="status-card" data-zone="lights" data-state="OFF">
-          <h3>Grow Lights</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-        </div>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="line1">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
+      <div class="status-card" data-zone="line2" data-state="OFF">
+        <h3>Line 2</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="line2">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
+      <div class="status-card" data-zone="line3" data-state="OFF">
+        <h3>Line 3</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="line3">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
+      <div class="status-card" data-zone="mister" data-state="OFF">
+        <h3>Mister</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="mister">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
+      <div class="status-card" data-zone="fan" data-state="OFF">
+        <h3>Fan</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="fan">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
+      <div class="status-card" data-zone="lights" data-state="OFF">
+        <h3>Grow Lights</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="lights">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
+      </div>
       </div>
     </section>
     <section class="view scheduler" data-view="schedule">
@@ -451,6 +567,49 @@
       </form>
       <div id="schedule-list" class="schedule-list empty">No schedules yet.</div>
     </section>
+    <section class="view logic" data-view="logic">
+      <div>
+        <h2>Logic Rules</h2>
+        <p style="margin:0;color:#718096;font-size:0.9rem;">Create sensor-driven overrides. INHIBIT_ON blocks schedule; FORCE_ON turns a device on.</p>
+      </div>
+      <form id="logic-form" class="logic-form">
+        <label>Zone
+          <select id="logic-zone" required>
+            <option value="line1">Line 1</option>
+            <option value="line2">Line 2</option>
+            <option value="line3">Line 3</option>
+            <option value="mister">Mister</option>
+            <option value="fan">Fan</option>
+            <option value="lights">Lights</option>
+          </select>
+        </label>
+        <label>Rule
+          <select id="logic-type" required>
+            <option value="INHIBIT_ON">Inhibit ON</option>
+            <option value="FORCE_ON">Force ON</option>
+          </select>
+        </label>
+        <label>Sensor name
+          <input type="text" id="logic-sensor" placeholder="e.g. temp" required>
+        </label>
+        <label>Operator
+          <select id="logic-op" required>
+            <option value=">">&gt;</option>
+            <option value="<">&lt;</option>
+            <option value=">=">&gt;=</option>
+            <option value="<=">&lt;=</option>
+          </select>
+        </label>
+        <label>ON threshold
+          <input type="number" step="0.1" id="logic-on" required>
+        </label>
+        <label>OFF threshold (optional)
+          <input type="number" step="0.1" id="logic-off">
+        </label>
+        <button type="submit">Add rule</button>
+      </form>
+      <div id="logic-rules" class="logic-rules"></div>
+    </section>
     <section class="view log" data-view="log">
       <h2>Event Log</h2>
       <pre id="log-output">Ready.</pre>
@@ -488,6 +647,8 @@
     let baseMode = 'AUTO';
     let updatingModeControl = false;
     const zoneRuntime = {};
+    let deviceModes = {};
+    const logicRules = {};
     setInterval(updateCountdowns, 1000);
 
     const connectBtn = document.getElementById('connect-btn');
@@ -505,10 +666,25 @@
     const views = Array.from(document.querySelectorAll('[data-view]'));
     const clockDisplay = document.getElementById('clock-display');
     const setClockBtn = document.getElementById('set-clock-btn');
+    const deviceModeSelects = Array.from(document.querySelectorAll('.device-mode-select'));
+    const logicForm = document.getElementById('logic-form');
+    const logicZoneSelect = document.getElementById('logic-zone');
+    const logicTypeSelect = document.getElementById('logic-type');
+    const logicSensorInput = document.getElementById('logic-sensor');
+    const logicOpSelect = document.getElementById('logic-op');
+    const logicOnInput = document.getElementById('logic-on');
+    const logicOffInput = document.getElementById('logic-off');
+    const logicRulesContainer = document.getElementById('logic-rules');
 
     disableModeControl(true);
     setModeControlValue(baseMode);
     updateStatusLabels();
+    zoneKeys.forEach(zone => {
+      deviceModes[zone] = 'SCHEDULE';
+      logicRules[zone] = [];
+    });
+    renderDeviceModes();
+    renderLogicRules();
     setClockEnabled(false);
 
     connectBtn.addEventListener('click', async () => {
@@ -580,6 +756,55 @@
       const { id } = button.dataset;
       sendDeleteSchedule(id);
     });
+
+    deviceModeSelects.forEach(select => {
+      select.addEventListener('change', () => {
+        const zone = select.getAttribute('data-zone');
+        const mode = select.value;
+        if (!zone) return;
+        deviceModes[zone] = mode;
+        renderDeviceModes();
+        sendSetDeviceMode(zone, mode);
+      });
+    });
+
+    if (logicForm) {
+      logicForm.addEventListener('submit', event => {
+        event.preventDefault();
+        const zone = logicZoneSelect.value;
+        const type = logicTypeSelect.value;
+        const sensor = logicSensorInput.value.trim();
+        const op = logicOpSelect.value;
+        const onVal = parseFloat(logicOnInput.value);
+        const offVal = logicOffInput.value ? parseFloat(logicOffInput.value) : null;
+        if (!zone || !type || !sensor || !op || Number.isNaN(onVal)) {
+          log('Logic form incomplete.');
+          return;
+        }
+        const rule = { type, sensor, op, on: onVal };
+        if (!Number.isNaN(offVal)) {
+          rule.off = offVal;
+        }
+        logicRules[zone] = logicRules[zone] || [];
+        logicRules[zone].push(rule);
+        renderLogicRules();
+        sendSetLogicRules(zone, logicRules[zone]);
+        logicForm.reset();
+      });
+    }
+
+    if (logicRulesContainer) {
+      logicRulesContainer.addEventListener('click', event => {
+        const btn = event.target.closest('button[data-zone][data-index]');
+        if (!btn) return;
+        const zone = btn.dataset.zone;
+        const idx = parseInt(btn.dataset.index, 10);
+        if (!zone || Number.isNaN(idx)) return;
+        logicRules[zone] = (logicRules[zone] || []).filter((_, i) => i !== idx);
+        renderLogicRules();
+        sendSetLogicRules(zone, logicRules[zone]);
+      });
+    }
 
     if (setClockBtn) {
       setClockBtn.addEventListener('click', () => {
@@ -847,6 +1072,7 @@
           heading.textContent = zoneLabels[zone] || zoneDefaults[zone] || zone;
         }
       });
+      renderDeviceModes();
     }
 
     function applyCompactState(msg) {
@@ -961,12 +1187,54 @@
       });
     }
 
+    function renderLogicRules() {
+      if (!logicRulesContainer) return;
+      logicRulesContainer.innerHTML = '';
+      let total = 0;
+      zoneKeys.forEach(zone => {
+        const rules = logicRules[zone] || [];
+        rules.forEach((rule, idx) => {
+          total++;
+          const div = document.createElement('div');
+          div.className = 'logic-rule-card';
+          const label = zoneLabels[zone] || zoneDefaults[zone] || zone;
+          const offText = rule.off !== undefined && rule.off !== null ? ` / off ${rule.off}` : '';
+          div.innerHTML = `<span>${label}: ${rule.type} when ${rule.sensor} ${rule.op} ${rule.on}${offText}</span>
+            <button type="button" data-zone="${zone}" data-index="${idx}">Delete</button>`;
+          logicRulesContainer.appendChild(div);
+        });
+      });
+      if (total === 0) {
+        const empty = document.createElement('div');
+        empty.textContent = 'No logic rules yet.';
+        empty.style.color = '#374151';
+        logicRulesContainer.appendChild(empty);
+      }
+    }
+
+    function renderDeviceModes() {
+      deviceModeSelects.forEach(select => {
+        const zone = select.getAttribute('data-zone');
+        if (!zone) return;
+        const mode = deviceModes[zone] || 'SCHEDULE';
+        select.value = mode;
+      });
+    }
+
     async function sendSetSchedule(schedule) {
       await sendJson({ cmd: 'setSchedule', ...schedule });
     }
 
     async function sendSetMode(mode) {
       await sendJson({ cmd: 'setMode', mode });
+    }
+
+    async function sendSetDeviceMode(zone, mode) {
+      await sendJson({ cmd: 'setDeviceMode', zone, mode });
+    }
+
+    async function sendSetLogicRules(zone, rules) {
+      await sendJson({ cmd: 'setLogicRules', zone, rules });
     }
 
     async function sendDeleteSchedule(id) {
