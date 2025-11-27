@@ -100,6 +100,9 @@ static const NimBLEUUID TX_UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
 
 // Forward declarations
 static void publishState();
+static void publishScheduleEntry(const ScheduleEntry &entry);
+static void publishScheduleDelete(const String &id);
+static void publishAllSchedules();
 static void publishPong();
 static void handleBleCommand(const std::string &payload);
 static bool setZone(Zone zone, bool on, uint32_t durationSeconds = 0, bool manual = false);
@@ -123,6 +126,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         (void)connInfo;
         bleConnected = true;
         publishState();
+        publishAllSchedules();
     }
 
     void onDisconnect(NimBLEServer *server, NimBLEConnInfo &connInfo, int reason) override {
@@ -249,6 +253,13 @@ static void publishState() {
     doc["m"] = (currentMode == MODE_AUTO) ? 1 : 0; // mode: 1=auto,0=off
     doc["o"] = manualOverrideActive() ? 1 : 0;     // any manual override active
     doc["t"] = nowMs;                              // timestamp
+    if (timeSynced) {
+        doc["c"] = static_cast<uint32_t>(currentEpoch()); // current epoch seconds
+        doc["x"] = 1;                                      // time synced flag
+    } else {
+        doc["c"] = 0;
+        doc["x"] = 0;
+    }
 
     JsonArray states = doc.createNestedArray("z"); // zone states
     JsonArray remaining = doc.createNestedArray("r");
@@ -288,6 +299,48 @@ static void publishPong() {
     }
 
     Serial.println("Responded with pong");
+}
+
+static void publishScheduleEntry(const ScheduleEntry &entry) {
+    StaticJsonDocument<256> doc;
+    doc["e"] = "sc"; // schedule create/update
+    doc["i"] = entry.id;
+    doc["z"] = ZONE_KEYS[entry.zone];
+    doc["h"] = entry.hour;
+    doc["m"] = entry.minute;
+    doc["d"] = entry.durationSeconds;
+    doc["w"] = entry.daysMask;
+
+    std::string payload;
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+
+    Serial.print("Schedule event: ");
+    Serial.println(payload.c_str());
+}
+
+static void publishScheduleDelete(const String &id) {
+    StaticJsonDocument<128> doc;
+    doc["e"] = "sd";
+    doc["i"] = id;
+    std::string payload;
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+    Serial.print("Schedule delete: ");
+    Serial.println(id);
+}
+
+static void publishAllSchedules() {
+    for (const auto &entry : schedules) {
+        publishScheduleEntry(entry);
+    }
 }
 
 static void handleBleCommand(const std::string &payload) {
@@ -375,6 +428,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.print("Schedule saved: ");
             Serial.println(scheduleId);
             publishState();
+            publishScheduleEntry(entry);
         }
     } else if (equalsIgnoreCase(cmd, "deleteSchedule")) {
         const char *idStr = doc["id"];
@@ -386,6 +440,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.print("Schedule deleted: ");
             Serial.println(idStr);
             publishState();
+            publishScheduleDelete(String(idStr));
         }
     } else if (equalsIgnoreCase(cmd, "setTime")) {
         uint32_t epoch = doc["epoch"] | 0;

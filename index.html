@@ -85,6 +85,26 @@
       padding: 0 0 0.5rem;
       flex-wrap: wrap;
     }
+    .clock-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.25rem 0;
+      font-weight: 600;
+      color: #2d3748;
+    }
+    .clock-time {
+      font-variant-numeric: tabular-nums;
+    }
+    .clock-button {
+      border: 1px solid #cbd5f5;
+      background: transparent;
+      color: inherit;
+      border-radius: 8px;
+      padding: 0.35rem 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
     .nav-btn {
       display: inline-flex;
       align-items: center;
@@ -319,6 +339,10 @@
       <button class="nav-btn" data-view-target="schedule">Schedule</button>
       <button class="nav-btn" data-view-target="log">Events</button>
     </nav>
+    <div class="clock-bar">
+      <span class="clock-time" id="clock-display">--:--:--</span>
+      <button type="button" class="clock-button" id="set-clock-btn">Set clock</button>
+    </div>
     <section class="view status-view active" data-view="status">
       <div class="status-grid">
         <div class="status-card" data-zone="line1" data-state="OFF">
@@ -452,6 +476,8 @@
     const dayCheckboxes = Array.from(document.querySelectorAll('input[name="schedule-day"]'));
     const navButtons = Array.from(document.querySelectorAll('.nav-btn'));
     const views = Array.from(document.querySelectorAll('[data-view]'));
+    const clockDisplay = document.getElementById('clock-display');
+    const setClockBtn = document.getElementById('set-clock-btn');
 
     disableModeControl(true);
     setModeControlValue(baseMode);
@@ -516,6 +542,12 @@
       const { id } = button.dataset;
       sendDeleteSchedule(id);
     });
+
+    if (setClockBtn) {
+      setClockBtn.addEventListener('click', () => {
+        sendSetTime(Math.floor(Date.now() / 1000));
+      });
+    }
 
     navButtons.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -597,6 +629,10 @@
         const msg = JSON.parse(json);
         if (msg.e === 's') {
           applyCompactState(msg);
+        } else if (msg.e === 'sc') {
+          upsertScheduleFromCompact(msg);
+        } else if (msg.e === 'sd') {
+          deleteScheduleById(msg.i);
         } else if (msg.evt === 'state') {
           if (msg.mode) {
             baseMode = msg.mode;
@@ -769,12 +805,79 @@
         setModeControlValue(baseMode);
         disableModeControl(false);
       }
+      if (typeof msg.c === 'number' && msg.c > 0) {
+        setDeviceEpoch(Number(msg.c));
+      }
       zoneKeys.forEach((zone, idx) => {
         const state = zones[idx] === 1 ? 'ON' : 'OFF';
         const remainingSeconds = Number(remaining[idx] || 0);
         const override = Boolean(overrides[idx]);
         updateZoneCard(zone, state, remainingSeconds, override);
       });
+    }
+
+    let deviceEpochSeconds = 0;
+    let deviceEpochUpdatedMs = 0;
+
+    function setDeviceEpoch(epochSeconds) {
+      deviceEpochSeconds = epochSeconds;
+      deviceEpochUpdatedMs = Date.now();
+      updateClockDisplay();
+    }
+
+    function updateClockDisplay() {
+      if (!clockDisplay) return;
+      let display = '--:--:--';
+      if (deviceEpochSeconds > 0) {
+        const nowMs = Date.now();
+        const elapsedMs = nowMs - deviceEpochUpdatedMs;
+        const current = deviceEpochSeconds + Math.floor(elapsedMs / 1000);
+        const date = new Date(current * 1000);
+        display = date.toLocaleString(undefined, { hour12: false });
+      }
+      clockDisplay.textContent = display;
+    }
+
+    setInterval(updateClockDisplay, 1000);
+
+    function upsertScheduleFromCompact(msg) {
+      if (!msg || !msg.i) return;
+      const idx = scheduleState.findIndex(s => s.id === msg.i);
+      const entry = {
+        id: msg.i,
+        zone: msg.z,
+        hour: Number(msg.h || 0),
+        minute: Number(msg.m || 0),
+        duration_s: Number(msg.d || 0),
+        daysMask: Number(msg.w || 0),
+        days: msg.days
+      };
+      if (idx >= 0) {
+        scheduleState[idx] = entry;
+      } else {
+        scheduleState.push(entry);
+      }
+      renderSchedules();
+    }
+
+    function deleteScheduleById(id) {
+      if (!id) return;
+      scheduleState = scheduleState.filter(s => s.id !== id);
+      renderSchedules();
+    }
+
+    function formatDays(entry) {
+      if (Array.isArray(entry.days) && entry.days.length) {
+        return entry.days.join(', ');
+      }
+      const mask = entry.daysMask || 0;
+      if (!mask) return 'Daily';
+      const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const picked = [];
+      names.forEach((name, idx) => {
+        if (mask & (1 << idx)) picked.push(name);
+      });
+      return picked.length ? picked.join(', ') : 'Daily';
     }
 
     function renderSchedules() {
@@ -791,7 +894,7 @@
         const label = zoneLabels[entry.zone] || zoneDefaults[entry.zone] || entry.zone;
         const time = `${String(entry.hour).padStart(2, '0')}:${String(entry.minute).padStart(2, '0')}`;
         const durationText = `${entry.duration_s} sec`;
-        const daysText = Array.isArray(entry.days) && entry.days.length ? entry.days.join(', ') : 'Daily';
+        const daysText = formatDays(entry);
         card.innerHTML = `
           <div class="schedule-card-header">
             <span>${label}</span>
@@ -820,9 +923,16 @@
       await sendJson({ cmd: 'deleteSchedule', id });
     }
 
+    async function sendSetTime(epochSeconds) {
+      if (!epochSeconds) return;
+      await sendJson({ cmd: 'setTime', epoch: epochSeconds });
+      setDeviceEpoch(epochSeconds);
+    }
+
     async function syncTime() {
       const epochSeconds = Math.floor(Date.now() / 1000);
       await sendJson({ cmd: 'setTime', epoch: epochSeconds });
+      setDeviceEpoch(epochSeconds);
     }
 
     function log(message) {
