@@ -118,6 +118,8 @@ static bool addOrUpdateSchedule(const ScheduleEntry &entry);
 static bool removeScheduleById(const String &id);
 static time_t currentEpoch();
 static void syncTime(uint32_t epochSeconds);
+static void setTimeOffsetMinutes(int32_t minutes);
+static int32_t timeOffsetSeconds = 0;
 static bool manualOverrideActive();
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -444,8 +446,10 @@ static void handleBleCommand(const std::string &payload) {
         }
     } else if (equalsIgnoreCase(cmd, "setTime")) {
         uint32_t epoch = doc["epoch"] | 0;
+        int32_t tzOffsetMin = doc["tzOffsetMin"] | 0;
         if (epoch > 0) {
             syncTime(epoch);
+            setTimeOffsetMinutes(tzOffsetMin);
             publishState();
         } else {
             Serial.println("Invalid epoch");
@@ -546,6 +550,12 @@ static void syncTime(uint32_t epochSeconds) {
     Serial.println(epochSeconds);
 }
 
+static void setTimeOffsetMinutes(int32_t minutes) {
+    timeOffsetSeconds = minutes * 60;
+    Serial.print("Time offset minutes set to ");
+    Serial.println(minutes);
+}
+
 static bool addOrUpdateSchedule(const ScheduleEntry &entry) {
     for (auto &existing : schedules) {
         if (existing.id == entry.id) {
@@ -580,11 +590,13 @@ static void evaluateSchedules() {
     if (now <= 0) {
         return;
     }
+    // Apply timezone offset so schedules run in local time.
+    time_t localNow = now + timeOffsetSeconds;
     struct tm timeinfo;
 #if defined(__XTENSA__) || defined(ESP_PLATFORM)
-    gmtime_r(&now, &timeinfo);
+    gmtime_r(&localNow, &timeinfo);
 #else
-    gmtime_r(&now, &timeinfo);
+    gmtime_r(&localNow, &timeinfo);
 #endif
     int minuteOfDay = timeinfo.tm_hour * 60 + timeinfo.tm_min;
     if (minuteOfDay == lastSchedulerMinute) {
