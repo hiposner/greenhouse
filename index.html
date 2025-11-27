@@ -75,21 +75,21 @@
     }
     main {
       flex: 1;
-      padding: clamp(1rem, 4vw, 2rem);
+      padding: clamp(1rem, 4vw, 1.5rem);
       display: grid;
-      gap: 1.5rem;
+      gap: 1rem;
     }
     .nav {
       display: flex;
       gap: 0.5rem;
-      padding: 0 0 0.5rem;
+      padding: 0 0 0.25rem;
       flex-wrap: wrap;
     }
     .clock-bar {
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      padding: 0.25rem 0;
+      padding: 0.1rem 0 0.4rem;
       font-weight: 700;
       color: var(--accent);
     }
@@ -177,7 +177,7 @@
     .status-override {
       font-size: 0.85rem;
       font-weight: 600;
-      color: #4a5568;
+      color: #1f2937;
     }
     .status-card.manual-active .status-override {
       color: var(--danger);
@@ -274,6 +274,9 @@
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
+      color: var(--accent);
+      font-weight: 700;
+      background: #eef7ef;
     }
     .schedule-card-header {
       display: flex;
@@ -291,10 +294,10 @@
     }
     .schedule-card-details {
       font-size: 0.9rem;
-      color: #4a5568;
+      color: #1f2937;
     }
     .schedule-list.empty {
-      color: #718096;
+      color: #374151;
       font-style: italic;
     }
     @media (prefers-color-scheme: dark) {
@@ -577,7 +580,9 @@
 
     function showView(name, clickedButton) {
       views.forEach(view => {
-        view.classList.toggle('active', view.dataset.view === name);
+        const active = view.dataset.view === name;
+        view.classList.toggle('active', active);
+        view.hidden = !active; // ensure non-active sections take no space
       });
       navButtons.forEach(btn => {
         btn.classList.toggle('active', btn === clickedButton);
