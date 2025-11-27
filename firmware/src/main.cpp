@@ -314,6 +314,16 @@ static void publishState() {
         overrides.add(zoneStates[i].manual ? 1 : 0);
     }
 
+    // Include sensor readings when available so the UI can display them.
+    if (!sensorReadings.empty()) {
+        JsonObject sensors = doc["sensors"].to<JsonObject>();
+        for (const auto &kv : sensorReadings) {
+            if (!std::isnan(kv.second)) {
+                sensors[kv.first.c_str()] = kv.second;
+            }
+        }
+    }
+
     std::string payload;
     serializeJson(doc, payload);
 
