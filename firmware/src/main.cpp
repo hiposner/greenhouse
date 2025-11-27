@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <time.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "config.h"
@@ -21,6 +22,24 @@ enum Zone {
 enum ControlMode {
     MODE_OFF = 0,
     MODE_AUTO
+};
+
+enum DeviceMode {
+    DEVICE_MODE_SCHEDULE = 0,
+    DEVICE_MODE_SCHEDULE_WITH_LOGIC,
+    DEVICE_MODE_LOGIC_ONLY
+};
+
+enum RuleType {
+    RULE_INHIBIT_ON = 0,
+    RULE_FORCE_ON
+};
+
+enum RuleOp {
+    OP_GT = 0,
+    OP_LT,
+    OP_GTE,
+    OP_LTE
 };
 
 static const uint8_t ZONE_OUTPUT_PINS[Z_COUNT] = {
@@ -88,11 +107,23 @@ struct ScheduleEntry {
     int lastRunYDay = -1;
 };
 
+struct LogicRule {
+    RuleType type = RULE_INHIBIT_ON;
+    RuleOp op = OP_GT;
+    String sensor;
+    float onThreshold = NAN;
+    float offThreshold = NAN; // optional hysteresis
+    bool active = false;      // hysteresis latch
+};
+
 static std::vector<ScheduleEntry> schedules;
+static std::vector<DeviceMode> deviceModes(Z_COUNT, DEVICE_MODE_SCHEDULE);
+static std::vector<std::vector<LogicRule>> deviceLogic(Z_COUNT);
 static bool timeSynced = false;
 static int64_t timeSyncEpoch = 0;
 static unsigned long timeSyncMillis = 0;
 static int lastSchedulerMinute = -1;
+static std::unordered_map<std::string, float> sensorReadings; // name -> last value
 
 static const NimBLEUUID SERVICE_UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const NimBLEUUID RX_UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
@@ -121,6 +152,13 @@ static void syncTime(uint32_t epochSeconds);
 static void setTimeOffsetMinutes(int32_t minutes);
 static int32_t timeOffsetSeconds = 0;
 static bool manualOverrideActive();
+struct LogicResult { bool forceOn = false; bool inhibitOn = false; };
+static LogicResult evaluateLogic(size_t zoneIndex);
+static bool evaluateRule(const LogicRule &rule, float value);
+static void applyModeAndPriority(unsigned long now);
+static float getSensorValue(const String &name, bool &valid);
+static bool parseDeviceMode(const char *text, DeviceMode &outMode);
+static bool parseLogicRule(const JsonVariantConst &obj, LogicRule &outRule);
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override {
@@ -454,6 +492,51 @@ static void handleBleCommand(const std::string &payload) {
         } else {
             Serial.println("Invalid epoch");
         }
+    } else if (equalsIgnoreCase(cmd, "setDeviceMode")) {
+        const char *zoneKey = doc["zone"];
+        const char *modeStr = doc["mode"];
+        Zone zone;
+        if (!parseZoneKey(zoneKey, zone) || !modeStr) {
+            Serial.println("Invalid device mode payload");
+            return;
+        }
+        DeviceMode mode;
+        if (!parseDeviceMode(modeStr, mode)) {
+            Serial.println("Unknown device mode");
+            return;
+        }
+        deviceModes[zone] = mode;
+        Serial.printf("Mode for %s set to %s\n", zoneKey, modeStr);
+    } else if (equalsIgnoreCase(cmd, "setLogicRules")) {
+        const char *zoneKey = doc["zone"];
+        Zone zone;
+        if (!parseZoneKey(zoneKey, zone)) {
+            Serial.println("Invalid zone in setLogicRules");
+            return;
+        }
+        JsonArrayConst rulesArr = doc["rules"].as<JsonArrayConst>();
+        if (rulesArr.isNull()) {
+            Serial.println("Missing rules array");
+            return;
+        }
+        std::vector<LogicRule> newRules;
+        for (JsonVariantConst item : rulesArr) {
+            LogicRule rule;
+            if (parseLogicRule(item, rule)) {
+                newRules.push_back(rule);
+            }
+        }
+        deviceLogic[zone] = std::move(newRules);
+        Serial.printf("Loaded %u logic rules for %s\n", static_cast<unsigned>(deviceLogic[zone].size()), zoneKey);
+    } else if (equalsIgnoreCase(cmd, "setSensor")) {
+        const char *name = doc["name"];
+        float value = doc["value"] | NAN;
+        if (!name || std::isnan(value)) {
+            Serial.println("Invalid sensor payload");
+            return;
+        }
+        sensorReadings[name] = value;
+        Serial.printf("Sensor %s updated to %.2f\n", name, value);
     } else if (equalsIgnoreCase(cmd, "ping")) {
         publishPong();
     } else {
@@ -507,6 +590,125 @@ static bool manualOverrideActive() {
         }
     }
     return false;
+}
+
+static float getSensorValue(const String &name, bool &valid) {
+    auto it = sensorReadings.find(name.c_str());
+    if (it == sensorReadings.end()) {
+        valid = false;
+        return NAN;
+    }
+    valid = true;
+    return it->second;
+}
+
+static bool evaluateRule(const LogicRule &rule, float value) {
+    switch (rule.op) {
+    case OP_GT: return value > rule.onThreshold;
+    case OP_LT: return value < rule.onThreshold;
+    case OP_GTE: return value >= rule.onThreshold;
+    case OP_LTE: return value <= rule.onThreshold;
+    default: return false;
+    }
+}
+
+static LogicResult evaluateLogic(size_t zoneIndex) {
+    LogicResult result;
+    if (zoneIndex >= deviceLogic.size()) {
+        return result;
+    }
+    const auto &rules = deviceLogic[zoneIndex];
+    for (auto &rule : const_cast<std::vector<LogicRule>&>(rules)) {
+        bool valid = false;
+        float value = getSensorValue(rule.sensor, valid);
+        if (!valid || std::isnan(rule.onThreshold)) {
+            continue;
+        }
+
+        bool match = false;
+        // Hysteresis: use offThreshold if provided to release the latch.
+        if (!std::isnan(rule.offThreshold)) {
+            if (!rule.active) {
+                match = evaluateRule(rule, value);
+                if (match) {
+                    rule.active = true;
+                }
+            } else {
+                // Currently active; check if we should clear it.
+                switch (rule.op) {
+                case OP_GT:  rule.active = value > rule.offThreshold; break;
+                case OP_GTE: rule.active = value >= rule.offThreshold; break;
+                case OP_LT:  rule.active = value < rule.offThreshold; break;
+                case OP_LTE: rule.active = value <= rule.offThreshold; break;
+                default: break;
+                }
+                match = rule.active;
+            }
+        } else {
+            match = evaluateRule(rule, value);
+            rule.active = match;
+        }
+
+        if (match) {
+            if (rule.type == RULE_FORCE_ON) {
+                result.forceOn = true;
+            } else if (rule.type == RULE_INHIBIT_ON) {
+                result.inhibitOn = true;
+            }
+        }
+    }
+    return result;
+}
+
+static bool parseDeviceMode(const char *text, DeviceMode &outMode) {
+    if (!text) return false;
+    if (equalsIgnoreCase(text, "SCHEDULE")) {
+        outMode = DEVICE_MODE_SCHEDULE;
+        return true;
+    }
+    if (equalsIgnoreCase(text, "SCHEDULE_WITH_LOGIC")) {
+        outMode = DEVICE_MODE_SCHEDULE_WITH_LOGIC;
+        return true;
+    }
+    if (equalsIgnoreCase(text, "LOGIC_ONLY")) {
+        outMode = DEVICE_MODE_LOGIC_ONLY;
+        return true;
+    }
+    return false;
+}
+
+static bool parseLogicRule(const JsonVariantConst &obj, LogicRule &outRule) {
+    if (!obj.is<JsonObjectConst>()) return false;
+    const char *type = obj["type"];
+    const char *op = obj["op"];
+    const char *sensor = obj["sensor"];
+    if (!type || !op || !sensor) return false;
+
+    if (equalsIgnoreCase(type, "INHIBIT_ON")) {
+        outRule.type = RULE_INHIBIT_ON;
+    } else if (equalsIgnoreCase(type, "FORCE_ON")) {
+        outRule.type = RULE_FORCE_ON;
+    } else {
+        return false;
+    }
+
+    if (equalsIgnoreCase(op, ">")) {
+        outRule.op = OP_GT;
+    } else if (equalsIgnoreCase(op, "<")) {
+        outRule.op = OP_LT;
+    } else if (equalsIgnoreCase(op, ">=")) {
+        outRule.op = OP_GTE;
+    } else if (equalsIgnoreCase(op, "<=")) {
+        outRule.op = OP_LTE;
+    } else {
+        return false;
+    }
+
+    outRule.sensor = sensor;
+    outRule.onThreshold = obj["on"] | NAN;
+    outRule.offThreshold = obj["off"] | NAN;
+    outRule.active = false;
+    return !std::isnan(outRule.onThreshold);
 }
 
 static void pollZoneButtons(unsigned long now) {
@@ -678,5 +880,49 @@ void loop() {
 
     pollZoneButtons(now);
 
+    applyModeAndPriority(now);
+
     delay(10);
+}
+
+static void applyModeAndPriority(unsigned long now) {
+    (void)now;
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        const auto mode = deviceModes[i];
+        // Manual overrides always win; skip logic when manual and ON.
+        if (zoneStates[i].manual && zoneStates[i].on) {
+            continue;
+        }
+
+        const bool scheduleIntent = zoneStates[i].on && !zoneStates[i].manual;
+        const auto logic = evaluateLogic(i);
+
+        bool desired = zoneStates[i].on;
+        switch (mode) {
+        case DEVICE_MODE_SCHEDULE:
+            desired = scheduleIntent;
+            break;
+        case DEVICE_MODE_SCHEDULE_WITH_LOGIC:
+            if (logic.forceOn) {
+                desired = true;
+            } else if (scheduleIntent && !logic.inhibitOn) {
+                desired = true;
+            } else {
+                desired = false;
+            }
+            break;
+        case DEVICE_MODE_LOGIC_ONLY:
+            desired = logic.forceOn;
+            break;
+        default:
+            desired = scheduleIntent;
+            break;
+        }
+
+        if (desired != zoneStates[i].on) {
+            // For logic-driven ON without a schedule intent, bound the run time.
+            uint32_t duration = (desired && !scheduleIntent) ? DEFAULT_MANUAL_SECS : 0;
+            setZone(static_cast<Zone>(i), desired, duration, false);
+        }
+    }
 }
