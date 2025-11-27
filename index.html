@@ -479,10 +479,12 @@
     const views = Array.from(document.querySelectorAll('[data-view]'));
     const clockDisplay = document.getElementById('clock-display');
     const setClockBtn = document.getElementById('set-clock-btn');
+    const setClockBtn = document.getElementById('set-clock-btn');
 
     disableModeControl(true);
     setModeControlValue(baseMode);
     updateStatusLabels();
+    setClockEnabled(false);
 
     connectBtn.addEventListener('click', async () => {
       if (device && device.gatt && device.gatt.connected) {
@@ -556,6 +558,10 @@
 
     if (setClockBtn) {
       setClockBtn.addEventListener('click', () => {
+        if (!rxCharacteristic) {
+          log('Connect to the device before setting the clock.');
+          return;
+        }
         sendSetTime(Math.floor(Date.now() / 1000));
       });
     }
@@ -619,6 +625,7 @@
       setModeControlValue(baseMode);
       setConnectButtonState('connected');
       log('Subscribed to notifications.');
+      setClockEnabled(true);
       await syncTime();
       sendPing();
     }
@@ -627,6 +634,7 @@
       log('Disconnected.');
       disableModeControl(true);
       setConnectButtonState('disconnected');
+      setClockEnabled(false);
     }
 
     function handleNotification(event) {
@@ -790,6 +798,13 @@
       updatingModeControl = true;
       modeSelect.value = value;
       updatingModeControl = false;
+    }
+
+    function setClockEnabled(enabled) {
+      if (!setClockBtn) {
+        return;
+      }
+      setClockBtn.disabled = !enabled;
     }
 
     function applyZoneLabels(labels) {
