@@ -88,9 +88,10 @@
     }
     main {
       flex: 1;
-      padding: clamp(1rem, 4vw, 1.5rem);
+      padding: clamp(1rem, 4vw, 1.2rem);
       display: grid;
-      gap: 0rem;
+      gap: 0;
+      row-gap: 0;
     }
     main > * {
       margin: 0;
@@ -101,9 +102,6 @@
       padding: 0;
       flex-wrap: wrap;
       margin: 0;
-    }
-    .nav + .clock-bar {
-      margin-top: 0;
     }
     .clock-bar {
       display: flex;
@@ -351,7 +349,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v12</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v13</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
