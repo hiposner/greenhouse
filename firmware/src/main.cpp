@@ -249,7 +249,7 @@ static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 
 static void publishState() {
     // Compact state payload (arrays) to stay under conservative MTU limits.
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     const unsigned long nowMs = millis();
     doc["e"] = "s"; // event: state
     doc["m"] = (currentMode == MODE_AUTO) ? 1 : 0; // mode: 1=auto,0=off
@@ -263,9 +263,9 @@ static void publishState() {
         doc["x"] = 0;
     }
 
-    JsonArray states = doc.createNestedArray("z"); // zone states
-    JsonArray remaining = doc.createNestedArray("r");
-    JsonArray overrides = doc.createNestedArray("v");
+    JsonArray states = doc["z"].to<JsonArray>(); // zone states
+    JsonArray remaining = doc["r"].to<JsonArray>();
+    JsonArray overrides = doc["v"].to<JsonArray>();
     for (size_t i = 0; i < Z_COUNT; ++i) {
         states.add(zoneStates[i].on ? 1 : 0);
         if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
@@ -289,7 +289,7 @@ static void publishState() {
 }
 
 static void publishPong() {
-    StaticJsonDocument<64> doc;
+    JsonDocument doc;
     doc["evt"] = "pong";
     doc["ts"] = millis();
     char buffer[96];
@@ -304,7 +304,7 @@ static void publishPong() {
 }
 
 static void publishScheduleEntry(const ScheduleEntry &entry) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     doc["e"] = "sc"; // schedule create/update
     doc["i"] = entry.id;
     doc["z"] = ZONE_KEYS[entry.zone];
@@ -326,7 +326,7 @@ static void publishScheduleEntry(const ScheduleEntry &entry) {
 }
 
 static void publishScheduleDelete(const String &id) {
-    StaticJsonDocument<128> doc;
+    JsonDocument doc;
     doc["e"] = "sd";
     doc["i"] = id;
     std::string payload;
