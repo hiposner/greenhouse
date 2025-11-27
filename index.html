@@ -86,16 +86,15 @@
       color: inherit;
       font-weight: 600;
     }
-   main {
-  flex: 1;
-  padding: clamp(1rem, 4vw, 1.2rem);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0.75rem; /* small space between nav, clock, and content */
-}
-
+    main {
+      flex: 1;
+      padding: clamp(1rem, 4vw, 1.2rem);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      gap: 0.75rem;
+    }
     main > * {
       margin: 0;
     }
@@ -245,39 +244,46 @@
       margin: 0;
       font-size: 1.2rem;
     }
+
+    /* --- Schedule form layout --- */
     .schedule-form {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 0.75rem;
-      align-items: end;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas:
+        "zone time"
+        "days duration"
+        "days add";
+      column-gap: 1.5rem;
+      row-gap: 1rem;
+      align-items: flex-start;
     }
-    .schedule-form label,
-    .schedule-form fieldset {
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-      font-size: 0.9rem;
+
+    /* Map children into the grid areas based on current HTML order */
+
+    /* 1st label: Zone */
+    .schedule-form > label:nth-of-type(1) {
+      grid-area: zone;
     }
-    .schedule-form input,
-    .schedule-form select {
-      padding: 0.4rem;
-      border-radius: 6px;
-      border: 1px solid #cbd5f5;
-      font-size: 0.95rem;
-      background: transparent;
-      color: inherit;
+
+    /* 2nd label: Time */
+    .schedule-form > label:nth-of-type(2) {
+      grid-area: time;
     }
-    .schedule-form fieldset {
-      border: 1px solid #cbd5f5;
-      border-radius: 8px;
-      padding: 0.5rem;
-      min-height: 100%;
+
+    /* 3rd label: Duration */
+    .schedule-form > label:nth-of-type(3) {
+      grid-area: duration;
     }
-    .day-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(40px, 1fr));
-      gap: 0.3rem;
-      font-size: 0.85rem;
+
+    /* Fieldset: Days */
+    .schedule-form > fieldset {
+      grid-area: days;
+    }
+
+    /* Button: Add Schedule */
+    .schedule-form > button {
+      grid-area: add;
+      justify-self: start;
     }
     .schedule-form button {
       padding: 0.5rem 1rem;
@@ -289,6 +295,57 @@
       cursor: pointer;
       min-height: 40px;
     }
+    /* Shared styling inside the form */
+    .schedule-form label,
+    .schedule-form fieldset {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      font-size: 0.9rem;
+    }
+
+    .schedule-form input,
+    .schedule-form select {
+      padding: 0.4rem;
+      border-radius: 6px;
+      border: 1px solid #cbd5f5;
+      font-size: 0.95rem;
+      background: transparent;
+      color: inherit;
+    }
+
+    .schedule-form fieldset {
+      border: 1px solid #cbd5f5;
+      border-radius: 8px;
+      padding: 0.5rem;
+      min-height: 100%;
+    }
+
+    /* Days grid */
+    .day-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(40px, 1fr));
+      gap: 0.3rem;
+      font-size: 0.85rem;
+    }
+
+    /* Mobile: collapse to one column */
+    @media (max-width: 480px) {
+      .schedule-form {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "zone"
+          "time"
+          "days"
+          "duration"
+          "add";
+      }
+
+      .schedule-form > button {
+        justify-self: stretch;
+      }
+    }
+
     .schedule-list {
       display: grid;
       gap: 0.75rem;
@@ -425,7 +482,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v16</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v17</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -451,82 +508,82 @@
       <div class="status-grid">
         <div class="status-card" data-zone="line1" data-state="OFF">
           <h3>Line 1</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="line1">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
-      <div class="status-card" data-zone="line2" data-state="OFF">
-        <h3>Line 2</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="line2">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
-      <div class="status-card" data-zone="line3" data-state="OFF">
-        <h3>Line 3</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="line3">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
-      <div class="status-card" data-zone="mister" data-state="OFF">
-        <h3>Mister</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="mister">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
-      <div class="status-card" data-zone="fan" data-state="OFF">
-        <h3>Fan</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="fan">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
-      <div class="status-card" data-zone="lights" data-state="OFF">
-        <h3>Grow Lights</h3>
-        <div class="status-state" data-state="OFF">OFF</div>
-        <div class="status-remaining">Timer: --</div>
-        <div class="status-override">Automatic control</div>
-        <label style="font-size:0.85rem;font-weight:600;">Mode
-          <select class="device-mode-select" data-zone="lights">
-            <option value="SCHEDULE">Schedule</option>
-            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-            <option value="LOGIC_ONLY">Logic only</option>
-          </select>
-        </label>
-      </div>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="line1">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-card" data-zone="line2" data-state="OFF">
+          <h3>Line 2</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="line2">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-card" data-zone="line3" data-state="OFF">
+          <h3>Line 3</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="line3">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-card" data-zone="mister" data-state="OFF">
+          <h3>Mister</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="mister">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-card" data-zone="fan" data-state="OFF">
+          <h3>Fan</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="fan">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
+        <div class="status-card" data-zone="lights" data-state="OFF">
+          <h3>Grow Lights</h3>
+          <div class="status-state" data-state="OFF">OFF</div>
+          <div class="status-remaining">Timer: --</div>
+          <div class="status-override">Automatic control</div>
+          <label style="font-size:0.85rem;font-weight:600;">Mode
+            <select class="device-mode-select" data-zone="lights">
+              <option value="SCHEDULE">Schedule</option>
+              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+              <option value="LOGIC_ONLY">Logic only</option>
+            </select>
+          </label>
+        </div>
       </div>
     </section>
     <section class="view scheduler" data-view="schedule">
