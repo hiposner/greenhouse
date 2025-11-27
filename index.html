@@ -523,6 +523,16 @@
       const hour = parseInt(hourStr, 10);
       const minute = parseInt(minuteStr, 10);
       const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sched-${Date.now()}`;
+      // Optimistically add to list; device will echo compact schedule event.
+      scheduleState.push({
+        id,
+        zone,
+        hour,
+        minute,
+        duration_s: duration,
+        days
+      });
+      renderSchedules();
       sendSetSchedule({
         id,
         zone,
