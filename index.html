@@ -482,7 +482,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v19</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v20</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -576,21 +576,22 @@
             </select>
           </label>
         </div>
-        <div class="status-card" data-zone="lights" data-state="OFF">
-          <h3>Grow Lights</h3>
-          <div class="status-state" data-state="OFF">OFF</div>
-          <div class="status-remaining">Timer: --</div>
-          <div class="status-override">Automatic control</div>
-          <label style="font-size:0.85rem;font-weight:600;">Mode
-            <select class="device-mode-select" data-zone="lights">
-              <option value="SCHEDULE">Schedule</option>
-              <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
-              <option value="LOGIC_ONLY">Logic only</option>
-            </select>
-          </label>
-        </div>
+      <div class="status-card" data-zone="lights" data-state="OFF">
+        <h3>Grow Lights</h3>
+        <div class="status-state" data-state="OFF">OFF</div>
+        <div class="status-remaining">Timer: --</div>
+        <div class="status-override">Automatic control</div>
+        <label style="font-size:0.85rem;font-weight:600;">Mode
+          <select class="device-mode-select" data-zone="lights">
+            <option value="SCHEDULE">Schedule</option>
+            <option value="SCHEDULE_WITH_LOGIC">Schedule + Logic</option>
+            <option value="LOGIC_ONLY">Logic only</option>
+          </select>
+        </label>
       </div>
-    </section>
+    </div>
+    <button class="clock-button" id="set-clock-btn" style="align-self:flex-start;">Set clock</button>
+  </section>
     <section class="view scheduler" data-view="schedule">
       <div>
         <h2>Schedules</h2>
@@ -742,7 +743,7 @@
     const sensorSoil1 = document.getElementById('sensor-soil1');
     const sensorSoil2 = document.getElementById('sensor-soil2');
     const sensorSoil3 = document.getElementById('sensor-soil3');
-    const setClockBtn = null; // no set clock button in UI
+    const setClockBtn = document.getElementById('set-clock-btn');
     const deviceModeSelects = Array.from(document.querySelectorAll('.device-mode-select'));
     const logicForm = document.getElementById('logic-form');
     const logicZoneSelect = document.getElementById('logic-zone');
@@ -762,6 +763,7 @@
     });
     renderDeviceModes();
     renderLogicRules();
+    setClockEnabled(false);
     setClockEnabled(false);
 
     connectBtn.addEventListener('click', async () => {
@@ -892,6 +894,16 @@
         showView(target, btn);
       });
     });
+
+    if (setClockBtn) {
+      setClockBtn.addEventListener('click', () => {
+        if (!rxCharacteristic) {
+          log('Connect to the device before setting the clock.');
+          return;
+        }
+        sendSetTime(Math.floor(Date.now() / 1000));
+      });
+    }
 
     function showView(name, clickedButton) {
       views.forEach(view => {
