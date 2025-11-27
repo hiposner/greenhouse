@@ -482,7 +482,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v17</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v18</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -502,7 +502,12 @@
     </nav>
     <div class="clock-bar">
       <span class="clock-time" id="clock-display">--:--:--</span>
-      <button type="button" class="clock-button" id="set-clock-btn">Set clock</button>
+      <span style="margin-left:0.5rem;font-weight:600;">Sensors:</span>
+      <span class="clock-time" id="sensor-temp">Temp: --</span>
+      <span class="clock-time" id="sensor-humidity">Humid: --</span>
+      <span class="clock-time" id="sensor-soil1">Soil1: --</span>
+      <span class="clock-time" id="sensor-soil2">Soil2: --</span>
+      <span class="clock-time" id="sensor-soil3">Soil3: --</span>
     </div>
     <section class="view status-view active" data-view="status">
       <div class="status-grid">
@@ -716,6 +721,7 @@
     let deviceModes = {};
     const logicRules = {};
     setInterval(updateCountdowns, 1000);
+    setInterval(updateClockDisplay, 1000);
 
     const connectBtn = document.getElementById('connect-btn');
     const modeSelect = document.getElementById('mode-select');
@@ -731,7 +737,11 @@
     const navButtons = Array.from(document.querySelectorAll('.nav-btn'));
     const views = Array.from(document.querySelectorAll('[data-view]'));
     const clockDisplay = document.getElementById('clock-display');
-    const setClockBtn = document.getElementById('set-clock-btn');
+    const sensorTemp = document.getElementById('sensor-temp');
+    const sensorHumidity = document.getElementById('sensor-humidity');
+    const sensorSoil1 = document.getElementById('sensor-soil1');
+    const sensorSoil2 = document.getElementById('sensor-soil2');
+    const sensorSoil3 = document.getElementById('sensor-soil3');
     const deviceModeSelects = Array.from(document.querySelectorAll('.device-mode-select'));
     const logicForm = document.getElementById('logic-form');
     const logicZoneSelect = document.getElementById('logic-zone');
@@ -869,16 +879,6 @@
         logicRules[zone] = (logicRules[zone] || []).filter((_, i) => i !== idx);
         renderLogicRules();
         sendSetLogicRules(zone, logicRules[zone]);
-      });
-    }
-
-    if (setClockBtn) {
-      setClockBtn.addEventListener('click', () => {
-        if (!rxCharacteristic) {
-          log('Connect to the device before setting the clock.');
-          return;
-        }
-        sendSetTime(Math.floor(Date.now() / 1000));
       });
     }
 
@@ -1153,6 +1153,9 @@
       if (typeof msg.c === 'number' && msg.c > 0) {
         setDeviceEpoch(Number(msg.c));
       }
+      if (msg.sensors) {
+        applySensorSnapshot(msg.sensors);
+      }
       zoneKeys.forEach((zone, idx) => {
         const state = zones[idx] === 1 ? 'ON' : 'OFF';
         const remainingSeconds = Number(remaining[idx] || 0);
@@ -1163,6 +1166,13 @@
 
     let deviceEpochSeconds = 0;
     let deviceEpochUpdatedMs = 0;
+    const sensorState = {
+      temp: null,
+      humidity: null,
+      soil1: null,
+      soil2: null,
+      soil3: null
+    };
 
     function setDeviceEpoch(epochSeconds) {
       deviceEpochSeconds = epochSeconds;
@@ -1181,6 +1191,7 @@
         display = date.toLocaleString(undefined, { hour12: false });
       }
       clockDisplay.textContent = display;
+      renderSensorLabels();
     }
 
     setInterval(updateClockDisplay, 1000);
@@ -1223,6 +1234,39 @@
         if (mask & (1 << idx)) picked.push(name);
       });
       return picked.length ? picked.join(', ') : 'Daily';
+    }
+
+    function applySensorSnapshot(sensors) {
+      if (!sensors || typeof sensors !== 'object') return;
+      ['temp','humidity','soil1','soil2','soil3'].forEach(key => {
+        if (key in sensors) {
+          sensorState[key] = sensors[key];
+        }
+      });
+      renderSensorLabels();
+    }
+
+    function renderSensorLabels() {
+      if (sensorTemp) {
+        const v = sensorState.temp;
+        sensorTemp.textContent = `Temp: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
+      }
+      if (sensorHumidity) {
+        const v = sensorState.humidity;
+        sensorHumidity.textContent = `Humid: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
+      }
+      if (sensorSoil1) {
+        const v = sensorState.soil1;
+        sensorSoil1.textContent = `Soil1: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
+      }
+      if (sensorSoil2) {
+        const v = sensorState.soil2;
+        sensorSoil2.textContent = `Soil2: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
+      }
+      if (sensorSoil3) {
+        const v = sensorState.soil3;
+        sensorSoil3.textContent = `Soil3: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
+      }
     }
 
     function renderSchedules() {
