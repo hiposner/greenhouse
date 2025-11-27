@@ -482,7 +482,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v18</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v19</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -742,6 +742,7 @@
     const sensorSoil1 = document.getElementById('sensor-soil1');
     const sensorSoil2 = document.getElementById('sensor-soil2');
     const sensorSoil3 = document.getElementById('sensor-soil3');
+    const setClockBtn = null; // no set clock button in UI
     const deviceModeSelects = Array.from(document.querySelectorAll('.device-mode-select'));
     const logicForm = document.getElementById('logic-form');
     const logicZoneSelect = document.getElementById('logic-zone');
