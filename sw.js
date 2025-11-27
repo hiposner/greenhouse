@@ -1,4 +1,4 @@
-const CACHE_NAME = 'greenhouse-control-v6';
+const CACHE_NAME = 'greenhouse-control-v7';
 const ASSETS = [
   './',
   './index.html',
