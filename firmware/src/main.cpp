@@ -2,6 +2,11 @@
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
 #include <ctype.h>
+#include <cmath>
+#include <DHT.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <time.h>
 #include <string>
 #include <unordered_map>
@@ -67,6 +72,28 @@ static const char *ZONE_KEYS[Z_COUNT] = {
 static const char *ZONE_LABELS[Z_COUNT] = {
     "Red (Line 1)", "Green (Line 2)", "Yellow (Line 3)", "Blue (Mister)", "Fan", "Grow Lights"
 };
+
+static constexpr int DISPLAY_WIDTH = 128;
+static constexpr int DISPLAY_HEIGHT = 64;
+static constexpr uint8_t DISPLAY_ADDRESS = 0x3C;
+static constexpr unsigned long DISPLAY_REFRESH_MS = 5000;
+static Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, -1);
+static bool displayReady = false;
+static unsigned long lastDisplayMs = 0;
+
+static constexpr unsigned long CLIMATE_POLL_MS = 15000;
+static constexpr unsigned long SOIL_POLL_MS = 10000;
+static constexpr unsigned long SENSOR_PUBLISH_MIN_MS = 10000;
+static constexpr float CLIMATE_DELTA_MIN = 0.2f;
+static constexpr float SOIL_DELTA_MIN = 10.0f;
+static DHT dht(PIN_DHT_DATA, DHT22);
+static unsigned long lastClimatePollMs = 0;
+static unsigned long lastSoilPollMs = 0;
+static unsigned long lastSensorPublishMs = 0;
+static float lastTempF = NAN;
+static float lastHumidity = NAN;
+static float lastSoil1 = NAN;
+static float lastSoil2 = NAN;
 
 static uint32_t defaultManualDuration(Zone zone) {
     switch (zone) {
@@ -159,6 +186,11 @@ static void applyModeAndPriority(unsigned long now);
 static float getSensorValue(const String &name, bool &valid);
 static bool parseDeviceMode(const char *text, DeviceMode &outMode);
 static bool parseLogicRule(const JsonVariantConst &obj, LogicRule &outRule);
+static void pollSensors(unsigned long now);
+static void pollClimateSensors(unsigned long now, bool &shouldPublish);
+static void pollSoilSensors(unsigned long now, bool &shouldPublish);
+static bool valueChanged(float previous, float current, float delta);
+static void updateDisplay(bool force);
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override {
@@ -852,6 +884,22 @@ void setup() {
         zoneStates[i].lastButtonChangeMs = now;
     }
 
+    dht.begin();
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    displayReady = display.begin(SSD1306_SWITCHCAPVCC, DISPLAY_ADDRESS);
+    if (displayReady) {
+        display.clearDisplay();
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Greenhouse");
+        display.println("Display ready");
+        display.display();
+        lastDisplayMs = millis();
+    } else {
+        Serial.println("SSD1306 not detected");
+    }
+
     NimBLEDevice::init(BLE_DEVICE_NAME);
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     // Increase MTU/data length so state JSON notifications are not truncated.
@@ -878,6 +926,7 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+    pollSensors(now);
     for (size_t i = 0; i < Z_COUNT; ++i) {
         uint32_t deadline = zoneStates[i].safetyUntilMs;
         if (deadline > 0 && static_cast<int32_t>(deadline - now) <= 0) {
@@ -935,4 +984,124 @@ static void applyModeAndPriority(unsigned long now) {
             setZone(static_cast<Zone>(i), desired, duration, false);
         }
     }
+}
+
+static bool valueChanged(float previous, float current, float delta) {
+    if (std::isnan(previous) && std::isnan(current)) {
+        return false;
+    }
+    if (std::isnan(previous) != std::isnan(current)) {
+        return true;
+    }
+    return std::fabs(previous - current) >= delta;
+}
+
+static void pollClimateSensors(unsigned long now, bool &shouldPublish) {
+    if (now - lastClimatePollMs < CLIMATE_POLL_MS) {
+        return;
+    }
+    lastClimatePollMs = now;
+
+    const float humidity = dht.readHumidity();
+    const float tempF = dht.readTemperature(true); // true = Fahrenheit
+
+    bool changed = false;
+    if (!std::isnan(humidity)) {
+        changed |= valueChanged(lastHumidity, humidity, CLIMATE_DELTA_MIN);
+        lastHumidity = humidity;
+        sensorReadings["humidity"] = humidity;
+    }
+    if (!std::isnan(tempF)) {
+        changed |= valueChanged(lastTempF, tempF, CLIMATE_DELTA_MIN);
+        lastTempF = tempF;
+        sensorReadings["temp"] = tempF;
+    }
+
+    shouldPublish |= changed;
+}
+
+static void pollSoilSensors(unsigned long now, bool &shouldPublish) {
+    if (now - lastSoilPollMs < SOIL_POLL_MS) {
+        return;
+    }
+    lastSoilPollMs = now;
+
+    // Raw ADC values (0-4095 on ESP32). These are useful for relative comparisons and logic rules.
+    if (PIN_SOIL1 != 0xFF) {
+        float soil1 = static_cast<float>(analogRead(PIN_SOIL1));
+        bool changed = valueChanged(lastSoil1, soil1, SOIL_DELTA_MIN);
+        lastSoil1 = soil1;
+        sensorReadings["soil1"] = soil1;
+        shouldPublish |= changed;
+    }
+    if (PIN_SOIL2 != 0xFF) {
+        float soil2 = static_cast<float>(analogRead(PIN_SOIL2));
+        bool changed = valueChanged(lastSoil2, soil2, SOIL_DELTA_MIN);
+        lastSoil2 = soil2;
+        sensorReadings["soil2"] = soil2;
+        shouldPublish |= changed;
+    }
+}
+
+static void pollSensors(unsigned long now) {
+    bool shouldPublish = false;
+    pollClimateSensors(now, shouldPublish);
+    pollSoilSensors(now, shouldPublish);
+
+    if (shouldPublish && (lastSensorPublishMs == 0 || (now - lastSensorPublishMs) >= SENSOR_PUBLISH_MIN_MS)) {
+        publishState(); // include latest sensorReadings in the compact state payload
+        lastSensorPublishMs = now;
+    }
+
+    if (shouldPublish || (displayReady && (now - lastDisplayMs) >= DISPLAY_REFRESH_MS)) {
+        updateDisplay(shouldPublish);
+        lastDisplayMs = now;
+    }
+}
+
+static void updateDisplay(bool force) {
+    (void)force;
+    if (!displayReady) {
+        return;
+    }
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+
+    display.print("Temp: ");
+    if (std::isnan(lastTempF)) {
+        display.print("--.-");
+    } else {
+        display.print(lastTempF, 1);
+    }
+    display.println(" F");
+
+    display.print("Hum: ");
+    if (std::isnan(lastHumidity)) {
+        display.print("--.-");
+    } else {
+        display.print(lastHumidity, 1);
+    }
+    display.println(" %");
+
+    display.print("Soil1: ");
+    if (std::isnan(lastSoil1)) {
+        display.println("--");
+    } else {
+        display.println(static_cast<int>(lastSoil1));
+    }
+
+    display.print("Soil2: ");
+    if (std::isnan(lastSoil2)) {
+        display.println("--");
+    } else {
+        display.println(static_cast<int>(lastSoil2));
+    }
+
+    display.print("Mode: ");
+    display.println(modeToString(currentMode));
+
+    display.display();
 }

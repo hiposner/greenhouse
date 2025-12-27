@@ -107,8 +107,9 @@
     }
     .clock-bar {
       display: flex;
-      align-items: center;
-      gap: 0.4rem;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
       padding: 0;
       margin: 0;
       font-weight: 700;
@@ -118,6 +119,12 @@
     .clock-time {
       font-variant-numeric: tabular-nums;
       font-size: 0.95rem;
+    }
+    .sensor-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
     }
     .clock-button {
       border: 1px solid #cbd5f5;
@@ -482,7 +489,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v21</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v22</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -502,12 +509,12 @@
     </nav>
     <div class="clock-bar">
       <span class="clock-time" id="clock-display">--:--:--</span>
-      <span style="margin-left:0.5rem;font-weight:600;">Sensors:</span>
-      <span class="clock-time" id="sensor-temp">Temp: --</span>
-      <span class="clock-time" id="sensor-humidity">Humid: --</span>
-      <span class="clock-time" id="sensor-soil1">Soil1: --</span>
-      <span class="clock-time" id="sensor-soil2">Soil2: --</span>
-      <span class="clock-time" id="sensor-soil3">Soil3: --</span>
+      <div class="sensor-row">
+        <span class="clock-time" id="sensor-temp">Temp: --</span>
+        <span class="clock-time" id="sensor-humidity">Humid: --</span>
+        <span class="clock-time" id="sensor-soil1">Soil1: --</span>
+        <span class="clock-time" id="sensor-soil2">Soil2: --</span>
+      </div>
     </div>
     <section class="view status-view active" data-view="status">
       <div class="status-grid">
@@ -661,7 +668,6 @@
             <option value="humidity">Humidity</option>
             <option value="soil1">Soil 1</option>
             <option value="soil2">Soil 2</option>
-            <option value="soil3">Soil 3</option>
           </select>
         </label>
         <label>Operator
@@ -742,7 +748,6 @@
     const sensorHumidity = document.getElementById('sensor-humidity');
     const sensorSoil1 = document.getElementById('sensor-soil1');
     const sensorSoil2 = document.getElementById('sensor-soil2');
-    const sensorSoil3 = document.getElementById('sensor-soil3');
     const setClockBtn = document.getElementById('set-clock-btn');
     const deviceModeSelects = Array.from(document.querySelectorAll('.device-mode-select'));
     const logicForm = document.getElementById('logic-form');
@@ -1183,8 +1188,7 @@
       temp: null,
       humidity: null,
       soil1: null,
-      soil2: null,
-      soil3: null
+      soil2: null
     };
 
     function setDeviceEpoch(epochSeconds) {
@@ -1251,7 +1255,7 @@
 
     function applySensorSnapshot(sensors) {
       if (!sensors || typeof sensors !== 'object') return;
-      ['temp','humidity','soil1','soil2','soil3'].forEach(key => {
+      ['temp','humidity','soil1','soil2'].forEach(key => {
         if (key in sensors) {
           sensorState[key] = sensors[key];
         }
@@ -1275,10 +1279,6 @@
       if (sensorSoil2) {
         const v = sensorState.soil2;
         sensorSoil2.textContent = `Soil2: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
-      }
-      if (sensorSoil3) {
-        const v = sensorState.soil3;
-        sensorSoil3.textContent = `Soil3: ${typeof v === 'number' ? v.toFixed(1) : '--'}`;
       }
     }
 
@@ -1376,8 +1376,7 @@
 
     async function syncTime() {
       const epochSeconds = Math.floor(Date.now() / 1000);
-      await sendJson({ cmd: 'setTime', epoch: epochSeconds });
-      setDeviceEpoch(epochSeconds);
+      await sendSetTime(epochSeconds);
     }
 
     function log(message) {
