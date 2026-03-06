@@ -217,10 +217,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         (void)server;
         (void)connInfo;
         bleConnected = true;
+        // The client explicitly requests sync after notifications are enabled.
+        // Avoid flooding events before the browser is ready.
         publishState();
-        publishAllSchedules();
-        publishAllDeviceModes();
-        publishAllLogicRules();
     }
 
     void onDisconnect(NimBLEServer *server, NimBLEConnInfo &connInfo, int reason) override {
@@ -445,6 +444,7 @@ static void publishScheduleDelete(const String &id) {
 static void publishAllSchedules() {
     for (const auto &entry : schedules) {
         publishScheduleEntry(entry);
+        delay(12);
     }
 }
 
@@ -505,6 +505,7 @@ static void publishDeviceMode(Zone zone) {
 static void publishAllDeviceModes() {
     for (size_t i = 0; i < Z_COUNT; ++i) {
         publishDeviceMode(static_cast<Zone>(i));
+        delay(12);
     }
 }
 
@@ -519,6 +520,7 @@ static void publishLogicRules(Zone zone) {
     if (bleConnected && txCharacteristic != nullptr) {
         txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(clearPayload.data()), clearPayload.size());
         txCharacteristic->notify();
+        delay(12);
     }
 
     const auto &rules = deviceLogic[zone];
@@ -542,6 +544,7 @@ static void publishLogicRules(Zone zone) {
         if (bleConnected && txCharacteristic != nullptr) {
             txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
             txCharacteristic->notify();
+            delay(12);
         }
     }
 }
@@ -921,10 +924,15 @@ static void handleBleCommand(const std::string &payload) {
         Serial.printf("Sensor %s updated to %.2f\n", name, value);
     } else if (equalsIgnoreCase(cmd, "syncState")) {
         publishSyncBoundary(true);
+        delay(12);
         publishState();
+        delay(12);
         publishAllSchedules();
+        delay(12);
         publishAllDeviceModes();
+        delay(12);
         publishAllLogicRules();
+        delay(12);
         publishSyncBoundary(false);
     } else if (equalsIgnoreCase(cmd, "ping")) {
         publishPong();

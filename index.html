@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v25</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v26</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -738,6 +738,7 @@
     let deviceModes = {};
     const logicRules = {};
     let syncSnapshotActive = false;
+    let syncSnapshotTimer = null;
     setInterval(updateCountdowns, 1000);
     setInterval(updateClockDisplay, 1000);
 
@@ -1243,20 +1244,18 @@
       if (!zone || typeof mode !== 'string' || !zoneKeys.includes(zone)) {
         return;
       }
+      bumpSyncSnapshotWatchdog();
       deviceModes[zone] = mode;
-      if (!syncSnapshotActive) {
-        renderDeviceModes();
-      }
+      renderDeviceModes();
     }
 
     function clearLogicRulesByZone(zone) {
       if (!zone || !zoneKeys.includes(zone)) {
         return;
       }
+      bumpSyncSnapshotWatchdog();
       logicRules[zone] = [];
-      if (!syncSnapshotActive) {
-        renderLogicRules();
-      }
+      renderLogicRules();
     }
 
     function upsertLogicRuleFromCompact(msg) {
@@ -1264,6 +1263,7 @@
       if (!zone || !zoneKeys.includes(zone)) {
         return;
       }
+      bumpSyncSnapshotWatchdog();
       const onThreshold = Number(msg.on);
       if (!msg.type || !msg.sensor || !msg.op || Number.isNaN(onThreshold)) {
         return;
@@ -1288,9 +1288,7 @@
         logicRules[zone].push(rule);
       }
       logicRules[zone] = logicRules[zone].filter(Boolean);
-      if (!syncSnapshotActive) {
-        renderLogicRules();
-      }
+      renderLogicRules();
     }
 
     let deviceEpochSeconds = 0;
@@ -1326,6 +1324,7 @@
 
     function upsertScheduleFromCompact(msg) {
       if (!msg || !msg.i) return;
+      bumpSyncSnapshotWatchdog();
       const idx = scheduleState.findIndex(s => s.id === msg.i);
       const entry = normalizeScheduleEntry({
         id: msg.i,
@@ -1342,29 +1341,50 @@
       } else {
         scheduleState.push(entry);
       }
-      if (!syncSnapshotActive) {
-        renderSchedules();
-      }
+      renderSchedules();
     }
 
     function deleteScheduleById(id) {
       if (!id) return;
+      bumpSyncSnapshotWatchdog();
       scheduleState = scheduleState.filter(s => s.id !== id);
-      if (!syncSnapshotActive) {
-        renderSchedules();
-      }
+      renderSchedules();
     }
 
     function beginSyncSnapshot() {
       syncSnapshotActive = true;
+      if (syncSnapshotTimer) {
+        clearTimeout(syncSnapshotTimer);
+      }
       scheduleState = [];
       zoneKeys.forEach(zone => {
         deviceModes[zone] = 'SCHEDULE';
         logicRules[zone] = [];
       });
+      renderSchedules();
+      renderDeviceModes();
+      renderLogicRules();
+      bumpSyncSnapshotWatchdog();
+    }
+
+    function bumpSyncSnapshotWatchdog() {
+      if (!syncSnapshotActive) {
+        return;
+      }
+      if (syncSnapshotTimer) {
+        clearTimeout(syncSnapshotTimer);
+      }
+      syncSnapshotTimer = setTimeout(() => {
+        syncSnapshotTimer = null;
+        endSyncSnapshot();
+      }, 1500);
     }
 
     function endSyncSnapshot() {
+      if (syncSnapshotTimer) {
+        clearTimeout(syncSnapshotTimer);
+        syncSnapshotTimer = null;
+      }
       syncSnapshotActive = false;
       renderDeviceModes();
       renderLogicRules();
