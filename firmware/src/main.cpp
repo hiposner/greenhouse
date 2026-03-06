@@ -380,6 +380,7 @@ static void publishState() {
     JsonArray states = doc["z"].to<JsonArray>(); // zone states
     JsonArray remaining = doc["r"].to<JsonArray>();
     JsonArray overrides = doc["v"].to<JsonArray>();
+    JsonArray modes = doc["k"].to<JsonArray>(); // device modes: 0=schedule,1=schedule+logic,2=logic-only
     for (size_t i = 0; i < Z_COUNT; ++i) {
         states.add(zoneStates[i].on ? 1 : 0);
         if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
@@ -388,6 +389,7 @@ static void publishState() {
             remaining.add(0);
         }
         overrides.add(zoneStates[i].manual ? 1 : 0);
+        modes.add(static_cast<uint8_t>(deviceModes[i]));
     }
 
     // Include sensor readings when available so the UI can display them.

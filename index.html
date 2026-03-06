@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v27</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v28</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -1250,6 +1250,7 @@
       const zones = Array.isArray(msg.z) ? msg.z : [];
       const remaining = Array.isArray(msg.r) ? msg.r : [];
       const overrides = Array.isArray(msg.v) ? msg.v : [];
+      const modes = Array.isArray(msg.k) ? msg.k : [];
       if (typeof msg.m === 'number') {
         baseMode = msg.m === 1 ? 'AUTO' : 'OFF';
         setModeControlValue(baseMode);
@@ -1266,7 +1267,16 @@
         const remainingSeconds = Number(remaining[idx] || 0);
         const override = Boolean(overrides[idx]);
         updateZoneCard(zone, state, remainingSeconds, override);
+        const modeCode = Number(modes[idx]);
+        if (modeCode === 0) {
+          deviceModes[zone] = 'SCHEDULE';
+        } else if (modeCode === 1) {
+          deviceModes[zone] = 'SCHEDULE_WITH_LOGIC';
+        } else if (modeCode === 2) {
+          deviceModes[zone] = 'LOGIC_ONLY';
+        }
       });
+      renderDeviceModes();
     }
 
     function applyDeviceModeUpdate(msg) {
