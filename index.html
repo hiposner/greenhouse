@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v30</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v31</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -1023,6 +1023,8 @@
         const msg = JSON.parse(json);
         if (msg.e === 's') {
           applyCompactState(msg);
+        } else if (msg.e === 'q') {
+          applyCompactSensors(msg);
         } else if (msg.e === 'sb') {
           beginSyncSnapshot();
         } else if (msg.e === 'se') {
@@ -1324,6 +1326,18 @@
         }
       });
       renderDeviceModes();
+    }
+
+    function applyCompactSensors(msg) {
+      if (!msg || typeof msg !== 'object') {
+        return;
+      }
+      const sensors = {};
+      if (msg.t !== undefined) sensors.temp = msg.t;
+      if (msg.h !== undefined) sensors.humidity = msg.h;
+      if (msg.s1 !== undefined) sensors.soil1 = msg.s1;
+      if (msg.s2 !== undefined) sensors.soil2 = msg.s2;
+      applySensorSnapshot(sensors);
     }
 
     function applyDeviceModeUpdate(msg) {

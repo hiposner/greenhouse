@@ -172,6 +172,7 @@ enum SyncReplayPhase {
     SYNC_REPLAY_IDLE = 0,
     SYNC_REPLAY_SB,
     SYNC_REPLAY_STATE,
+    SYNC_REPLAY_SENSORS,
     SYNC_REPLAY_SCHEDULES,
     SYNC_REPLAY_DEVICE_MODES,
     SYNC_REPLAY_LOGIC_CLEAR,
@@ -202,6 +203,7 @@ static void publishLogicRule(Zone zone, size_t ruleIndex);
 static void publishLogicRules(Zone zone);
 static void publishAllLogicRules();
 static void publishSyncBoundary(bool begin);
+static void publishSensorSnapshot();
 static void publishPong();
 static void handleBleCommand(const std::string &payload);
 static void resetSyncReplayState();
@@ -421,26 +423,6 @@ static void publishState() {
         sources.add(static_cast<uint8_t>(zoneStates[i].source));
     }
 
-    // Include latest sensor readings for UI display.
-    JsonObject sensors = doc["sensors"].to<JsonObject>();
-    if (!std::isnan(lastTempF)) {
-        sensors["temp"] = lastTempF;
-    }
-    if (!std::isnan(lastHumidity)) {
-        sensors["humidity"] = lastHumidity;
-    }
-    if (!std::isnan(lastSoil1)) {
-        sensors["soil1"] = lastSoil1;
-    }
-    if (!std::isnan(lastSoil2)) {
-        sensors["soil2"] = lastSoil2;
-    }
-    for (const auto &kv : sensorReadings) {
-        if (!std::isnan(kv.second)) {
-            sensors[kv.first.c_str()] = kv.second;
-        }
-    }
-
     std::string payload;
     serializeJson(doc, payload);
 
@@ -451,6 +433,33 @@ static void publishState() {
 
     Serial.print("State event: ");
     Serial.println(payload.c_str());
+}
+
+static void publishSensorSnapshot() {
+    JsonDocument doc;
+    doc["e"] = "q"; // compact sensor snapshot
+    if (!std::isnan(lastTempF)) {
+        doc["t"] = lastTempF;
+    }
+    if (!std::isnan(lastHumidity)) {
+        doc["h"] = lastHumidity;
+    }
+    if (!std::isnan(lastSoil1)) {
+        doc["s1"] = lastSoil1;
+    }
+    if (!std::isnan(lastSoil2)) {
+        doc["s2"] = lastSoil2;
+    }
+    if (doc.size() <= 1) {
+        return; // only "e" present
+    }
+
+    std::string payload;
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 }
 
 static void publishPong() {
@@ -677,6 +686,10 @@ static void serviceSyncReplay(unsigned long now) {
         break;
     case SYNC_REPLAY_STATE:
         publishState();
+        syncReplayPhase = SYNC_REPLAY_SENSORS;
+        break;
+    case SYNC_REPLAY_SENSORS:
+        publishSensorSnapshot();
         syncReplayPhase = SYNC_REPLAY_SCHEDULES;
         break;
     case SYNC_REPLAY_SCHEDULES:
@@ -1582,7 +1595,7 @@ static void pollSensors(unsigned long now) {
     pollSoilSensors(now, shouldPublish);
 
     if (shouldPublish && (lastSensorPublishMs == 0 || (now - lastSensorPublishMs) >= SENSOR_PUBLISH_MIN_MS)) {
-        publishState(); // include latest sensorReadings in the compact state payload
+        publishSensorSnapshot();
         lastSensorPublishMs = now;
     }
 
