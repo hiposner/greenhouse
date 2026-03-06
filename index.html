@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v29</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v30</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -1097,11 +1097,7 @@
       const stateLabel = card.querySelector('.status-state');
       if (stateLabel) {
         stateLabel.dataset.state = normalized;
-        if (normalized === 'ON' && sourceCode !== 1) {
-          stateLabel.textContent = 'RUN';
-        } else {
-          stateLabel.textContent = normalized;
-        }
+        stateLabel.textContent = normalized;
       }
 
       setZoneRuntime(zone, normalized === 'ON' ? remainingSeconds : 0, override, sourceCode);
@@ -1161,6 +1157,8 @@
                 text = `Manual: ${remainingMinutes} min`;
               } else if (info.source === 3) {
                 text = `Logic: ${remainingMinutes} min`;
+              } else if (info.source === 2) {
+                text = `Schedule: ${remainingMinutes} min`;
               } else {
                 text = `Timer: ${remainingMinutes} min`;
               }
@@ -1168,10 +1166,14 @@
           } else if (info.source === 3) {
             text = 'Logic run';
           } else if (info.source === 2) {
-            text = 'Scheduled run';
+            text = 'Schedule run';
           } else if (info.source === 1) {
             text = 'Manual';
+          } else {
+            text = 'Run';
           }
+        } else {
+          text = 'Run';
         }
       } else if (info && !info.latched) {
         delete zoneRuntime[zone];
@@ -1524,10 +1526,23 @@
 
     function applySensorSnapshot(sensors) {
       if (!sensors || typeof sensors !== 'object') return;
-      ['temp','humidity','soil1','soil2'].forEach(key => {
-        if (key in sensors) {
-          sensorState[key] = sensors[key];
-        }
+      const aliases = {
+        temp: ['temp', 'temperature'],
+        humidity: ['humidity', 'humid'],
+        soil1: ['soil1'],
+        soil2: ['soil2']
+      };
+      Object.keys(aliases).forEach(targetKey => {
+        const keys = aliases[targetKey];
+        let found = false;
+        keys.forEach(sourceKey => {
+          if (found || !(sourceKey in sensors)) return;
+          const numeric = Number(sensors[sourceKey]);
+          if (Number.isFinite(numeric)) {
+            sensorState[targetKey] = numeric;
+            found = true;
+          }
+        });
       });
       renderSensorLabels();
     }

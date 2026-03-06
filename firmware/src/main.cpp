@@ -421,13 +421,23 @@ static void publishState() {
         sources.add(static_cast<uint8_t>(zoneStates[i].source));
     }
 
-    // Include sensor readings when available so the UI can display them.
-    if (!sensorReadings.empty()) {
-        JsonObject sensors = doc["sensors"].to<JsonObject>();
-        for (const auto &kv : sensorReadings) {
-            if (!std::isnan(kv.second)) {
-                sensors[kv.first.c_str()] = kv.second;
-            }
+    // Include latest sensor readings for UI display.
+    JsonObject sensors = doc["sensors"].to<JsonObject>();
+    if (!std::isnan(lastTempF)) {
+        sensors["temp"] = lastTempF;
+    }
+    if (!std::isnan(lastHumidity)) {
+        sensors["humidity"] = lastHumidity;
+    }
+    if (!std::isnan(lastSoil1)) {
+        sensors["soil1"] = lastSoil1;
+    }
+    if (!std::isnan(lastSoil2)) {
+        sensors["soil2"] = lastSoil2;
+    }
+    for (const auto &kv : sensorReadings) {
+        if (!std::isnan(kv.second)) {
+            sensors[kv.first.c_str()] = kv.second;
         }
     }
 
