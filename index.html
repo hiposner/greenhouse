@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v26</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v27</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -739,6 +739,10 @@
     const logicRules = {};
     let syncSnapshotActive = false;
     let syncSnapshotTimer = null;
+    let syncRetryTimer = null;
+    let awaitingSyncSnapshot = false;
+    let syncRetryCount = 0;
+    let syncSnapshotSawBegin = false;
     setInterval(updateCountdowns, 1000);
     setInterval(updateClockDisplay, 1000);
 
@@ -983,6 +987,17 @@
 
     function handleDisconnect() {
       log('Disconnected.');
+      syncSnapshotActive = false;
+      awaitingSyncSnapshot = false;
+      syncSnapshotSawBegin = false;
+      if (syncSnapshotTimer) {
+        clearTimeout(syncSnapshotTimer);
+        syncSnapshotTimer = null;
+      }
+      if (syncRetryTimer) {
+        clearTimeout(syncRetryTimer);
+        syncRetryTimer = null;
+      }
       disableModeControl(true);
       setConnectButtonState('disconnected');
       setClockEnabled(false);
@@ -1136,14 +1151,30 @@
     }
 
     async function requestSyncSnapshot() {
+      awaitingSyncSnapshot = true;
+      syncRetryCount = 0;
+      syncSnapshotSawBegin = false;
       await sendSyncState();
-      await sleep(250);
-      // Retry once in case notifications were dropped during reconnect settle.
-      await sendSyncState();
+      scheduleSyncRetry();
     }
 
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
+    function scheduleSyncRetry() {
+      if (syncRetryTimer) {
+        clearTimeout(syncRetryTimer);
+      }
+      syncRetryTimer = setTimeout(async () => {
+        if (!awaitingSyncSnapshot) {
+          return;
+        }
+        if (syncRetryCount >= 3) {
+          log('Sync snapshot incomplete after retries.');
+          awaitingSyncSnapshot = false;
+          return;
+        }
+        syncRetryCount += 1;
+        await sendSyncState();
+        scheduleSyncRetry();
+      }, 1200);
     }
 
     async function sendJson(obj) {
@@ -1352,6 +1383,8 @@
     }
 
     function beginSyncSnapshot() {
+      syncSnapshotSawBegin = true;
+      awaitingSyncSnapshot = true;
       syncSnapshotActive = true;
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
@@ -1385,10 +1418,19 @@
         clearTimeout(syncSnapshotTimer);
         syncSnapshotTimer = null;
       }
+      const hadBegin = syncSnapshotSawBegin;
+      syncSnapshotSawBegin = false;
       syncSnapshotActive = false;
-      renderDeviceModes();
-      renderLogicRules();
-      renderSchedules();
+      if (hadBegin) {
+        awaitingSyncSnapshot = false;
+        if (syncRetryTimer) {
+          clearTimeout(syncRetryTimer);
+          syncRetryTimer = null;
+        }
+        renderDeviceModes();
+        renderLogicRules();
+        renderSchedules();
+      }
     }
 
     function formatDays(entry) {

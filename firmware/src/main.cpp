@@ -159,6 +159,23 @@ static int lastSchedulerMinute = -1;
 static std::unordered_map<std::string, float> sensorReadings; // name -> last value
 static constexpr const char *PERSIST_NAMESPACE = "ghctl";
 static constexpr const char *PERSIST_KEY_STATE = "state";
+enum SyncReplayPhase {
+    SYNC_REPLAY_IDLE = 0,
+    SYNC_REPLAY_SB,
+    SYNC_REPLAY_STATE,
+    SYNC_REPLAY_SCHEDULES,
+    SYNC_REPLAY_DEVICE_MODES,
+    SYNC_REPLAY_LOGIC_CLEAR,
+    SYNC_REPLAY_LOGIC_RULES,
+    SYNC_REPLAY_SE
+};
+static SyncReplayPhase syncReplayPhase = SYNC_REPLAY_IDLE;
+static size_t syncReplayScheduleIdx = 0;
+static size_t syncReplayModeIdx = 0;
+static size_t syncReplayLogicZoneIdx = 0;
+static size_t syncReplayLogicRuleIdx = 0;
+static unsigned long syncReplayNextMs = 0;
+static constexpr unsigned long SYNC_REPLAY_STEP_MS = 25;
 
 static const NimBLEUUID SERVICE_UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const NimBLEUUID RX_UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
@@ -171,11 +188,16 @@ static void publishScheduleDelete(const String &id);
 static void publishAllSchedules();
 static void publishDeviceMode(Zone zone);
 static void publishAllDeviceModes();
+static void publishLogicClear(Zone zone);
+static void publishLogicRule(Zone zone, size_t ruleIndex);
 static void publishLogicRules(Zone zone);
 static void publishAllLogicRules();
 static void publishSyncBoundary(bool begin);
 static void publishPong();
 static void handleBleCommand(const std::string &payload);
+static void resetSyncReplayState();
+static void startSyncReplay();
+static void serviceSyncReplay(unsigned long now);
 static bool loadPersistentState();
 static bool savePersistentState();
 static void initRtc();
@@ -227,6 +249,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         (void)connInfo;
         (void)reason;
         bleConnected = false;
+        resetSyncReplayState();
         NimBLEDevice::startAdvertising();
     }
 };
@@ -444,7 +467,6 @@ static void publishScheduleDelete(const String &id) {
 static void publishAllSchedules() {
     for (const auto &entry : schedules) {
         publishScheduleEntry(entry);
-        delay(12);
     }
 }
 
@@ -505,11 +527,10 @@ static void publishDeviceMode(Zone zone) {
 static void publishAllDeviceModes() {
     for (size_t i = 0; i < Z_COUNT; ++i) {
         publishDeviceMode(static_cast<Zone>(i));
-        delay(12);
     }
 }
 
-static void publishLogicRules(Zone zone) {
+static void publishLogicClear(Zone zone) {
     JsonDocument clearDoc;
     clearDoc["e"] = "lc";
     clearDoc["z"] = ZONE_KEYS[zone];
@@ -520,32 +541,44 @@ static void publishLogicRules(Zone zone) {
     if (bleConnected && txCharacteristic != nullptr) {
         txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(clearPayload.data()), clearPayload.size());
         txCharacteristic->notify();
-        delay(12);
+    }
+}
+
+static void publishLogicRule(Zone zone, size_t ruleIndex) {
+    if (zone >= Z_COUNT) {
+        return;
+    }
+    const auto &rules = deviceLogic[zone];
+    if (ruleIndex >= rules.size()) {
+        return;
+    }
+    const auto &rule = rules[ruleIndex];
+    JsonDocument doc;
+    doc["e"] = "la";
+    doc["z"] = ZONE_KEYS[zone];
+    doc["i"] = static_cast<uint16_t>(ruleIndex);
+    doc["type"] = ruleTypeToString(rule.type);
+    doc["sensor"] = rule.sensor;
+    doc["op"] = ruleOpToString(rule.op);
+    doc["on"] = rule.onThreshold;
+    if (!std::isnan(rule.offThreshold)) {
+        doc["off"] = rule.offThreshold;
     }
 
+    std::string payload;
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+}
+
+static void publishLogicRules(Zone zone) {
+    publishLogicClear(zone);
     const auto &rules = deviceLogic[zone];
     for (size_t i = 0; i < rules.size(); ++i) {
-        const auto &rule = rules[i];
-        JsonDocument doc;
-        doc["e"] = "la";
-        doc["z"] = ZONE_KEYS[zone];
-        doc["i"] = static_cast<uint16_t>(i);
-        doc["type"] = ruleTypeToString(rule.type);
-        doc["sensor"] = rule.sensor;
-        doc["op"] = ruleOpToString(rule.op);
-        doc["on"] = rule.onThreshold;
-        if (!std::isnan(rule.offThreshold)) {
-            doc["off"] = rule.offThreshold;
-        }
-
-        std::string payload;
-        serializeJson(doc, payload);
-
-        if (bleConnected && txCharacteristic != nullptr) {
-            txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
-            txCharacteristic->notify();
-            delay(12);
-        }
+        publishLogicRule(zone, i);
     }
 }
 
@@ -563,6 +596,99 @@ static void publishSyncBoundary(bool begin) {
     if (bleConnected && txCharacteristic != nullptr) {
         txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
         txCharacteristic->notify();
+    }
+}
+
+static void resetSyncReplayState() {
+    syncReplayPhase = SYNC_REPLAY_IDLE;
+    syncReplayScheduleIdx = 0;
+    syncReplayModeIdx = 0;
+    syncReplayLogicZoneIdx = 0;
+    syncReplayLogicRuleIdx = 0;
+    syncReplayNextMs = 0;
+}
+
+static void startSyncReplay() {
+    syncReplayScheduleIdx = 0;
+    syncReplayModeIdx = 0;
+    syncReplayLogicZoneIdx = 0;
+    syncReplayLogicRuleIdx = 0;
+    syncReplayNextMs = 0;
+    syncReplayPhase = SYNC_REPLAY_SB;
+}
+
+static void serviceSyncReplay(unsigned long now) {
+    if (syncReplayPhase == SYNC_REPLAY_IDLE) {
+        return;
+    }
+    if (!bleConnected || txCharacteristic == nullptr) {
+        resetSyncReplayState();
+        return;
+    }
+    if (syncReplayNextMs != 0 && static_cast<int32_t>(now - syncReplayNextMs) < 0) {
+        return;
+    }
+
+    switch (syncReplayPhase) {
+    case SYNC_REPLAY_SB:
+        publishSyncBoundary(true);
+        syncReplayPhase = SYNC_REPLAY_STATE;
+        break;
+    case SYNC_REPLAY_STATE:
+        publishState();
+        syncReplayPhase = SYNC_REPLAY_SCHEDULES;
+        break;
+    case SYNC_REPLAY_SCHEDULES:
+        if (syncReplayScheduleIdx < schedules.size()) {
+            publishScheduleEntry(schedules[syncReplayScheduleIdx]);
+            ++syncReplayScheduleIdx;
+        } else {
+            syncReplayPhase = SYNC_REPLAY_DEVICE_MODES;
+        }
+        break;
+    case SYNC_REPLAY_DEVICE_MODES:
+        if (syncReplayModeIdx < Z_COUNT) {
+            publishDeviceMode(static_cast<Zone>(syncReplayModeIdx));
+            ++syncReplayModeIdx;
+        } else {
+            syncReplayPhase = SYNC_REPLAY_LOGIC_CLEAR;
+        }
+        break;
+    case SYNC_REPLAY_LOGIC_CLEAR:
+        if (syncReplayLogicZoneIdx >= Z_COUNT) {
+            syncReplayPhase = SYNC_REPLAY_SE;
+            break;
+        }
+        publishLogicClear(static_cast<Zone>(syncReplayLogicZoneIdx));
+        syncReplayLogicRuleIdx = 0;
+        syncReplayPhase = SYNC_REPLAY_LOGIC_RULES;
+        break;
+    case SYNC_REPLAY_LOGIC_RULES: {
+        if (syncReplayLogicZoneIdx >= Z_COUNT) {
+            syncReplayPhase = SYNC_REPLAY_SE;
+            break;
+        }
+        const auto &rules = deviceLogic[syncReplayLogicZoneIdx];
+        if (syncReplayLogicRuleIdx < rules.size()) {
+            publishLogicRule(static_cast<Zone>(syncReplayLogicZoneIdx), syncReplayLogicRuleIdx);
+            ++syncReplayLogicRuleIdx;
+        } else {
+            ++syncReplayLogicZoneIdx;
+            syncReplayPhase = SYNC_REPLAY_LOGIC_CLEAR;
+        }
+        break;
+    }
+    case SYNC_REPLAY_SE:
+        publishSyncBoundary(false);
+        resetSyncReplayState();
+        break;
+    default:
+        resetSyncReplayState();
+        break;
+    }
+
+    if (syncReplayPhase != SYNC_REPLAY_IDLE) {
+        syncReplayNextMs = now + SYNC_REPLAY_STEP_MS;
     }
 }
 
@@ -923,17 +1049,7 @@ static void handleBleCommand(const std::string &payload) {
         sensorReadings[name] = value;
         Serial.printf("Sensor %s updated to %.2f\n", name, value);
     } else if (equalsIgnoreCase(cmd, "syncState")) {
-        publishSyncBoundary(true);
-        delay(12);
-        publishState();
-        delay(12);
-        publishAllSchedules();
-        delay(12);
-        publishAllDeviceModes();
-        delay(12);
-        publishAllLogicRules();
-        delay(12);
-        publishSyncBoundary(false);
+        startSyncReplay();
     } else if (equalsIgnoreCase(cmd, "ping")) {
         publishPong();
     } else {
@@ -1304,6 +1420,7 @@ void loop() {
     pollZoneButtons(now);
 
     applyModeAndPriority(now);
+    serviceSyncReplay(now);
 
     delay(10);
 }
