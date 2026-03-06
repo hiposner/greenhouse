@@ -7,6 +7,8 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Preferences.h>
+#include <RTClib.h>
 #include <time.h>
 #include <string>
 #include <unordered_map>
@@ -146,11 +148,17 @@ struct LogicRule {
 static std::vector<ScheduleEntry> schedules;
 static std::vector<DeviceMode> deviceModes(Z_COUNT, DEVICE_MODE_SCHEDULE);
 static std::vector<std::vector<LogicRule>> deviceLogic(Z_COUNT);
+static Preferences preferences;
+static bool preferencesReady = false;
+static RTC_DS3231 rtc;
+static bool rtcReady = false;
 static bool timeSynced = false;
 static int64_t timeSyncEpoch = 0;
 static unsigned long timeSyncMillis = 0;
 static int lastSchedulerMinute = -1;
 static std::unordered_map<std::string, float> sensorReadings; // name -> last value
+static constexpr const char *PERSIST_NAMESPACE = "ghctl";
+static constexpr const char *PERSIST_KEY_STATE = "state";
 
 static const NimBLEUUID SERVICE_UUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const NimBLEUUID RX_UUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
@@ -161,8 +169,16 @@ static void publishState();
 static void publishScheduleEntry(const ScheduleEntry &entry);
 static void publishScheduleDelete(const String &id);
 static void publishAllSchedules();
+static void publishDeviceMode(Zone zone);
+static void publishAllDeviceModes();
+static void publishLogicRules(Zone zone);
+static void publishAllLogicRules();
 static void publishPong();
 static void handleBleCommand(const std::string &payload);
+static bool loadPersistentState();
+static bool savePersistentState();
+static void initRtc();
+static void saveTimeToRtc(uint32_t epochSeconds);
 static bool setZone(Zone zone, bool on, uint32_t durationSeconds = 0, bool manual = false);
 static void digitalWriteActive(uint8_t pin, bool on);
 static bool parseZoneKey(const char *key, Zone &zone);
@@ -185,6 +201,9 @@ static bool evaluateRule(const LogicRule &rule, float value);
 static void applyModeAndPriority(unsigned long now);
 static float getSensorValue(const String &name, bool &valid);
 static bool parseDeviceMode(const char *text, DeviceMode &outMode);
+static const char *deviceModeToString(DeviceMode mode);
+static const char *ruleTypeToString(RuleType type);
+static const char *ruleOpToString(RuleOp op);
 static bool parseLogicRule(const JsonVariantConst &obj, LogicRule &outRule);
 static void pollSensors(unsigned long now);
 static void pollClimateSensors(unsigned long now, bool &shouldPublish);
@@ -199,6 +218,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         bleConnected = true;
         publishState();
         publishAllSchedules();
+        publishAllDeviceModes();
+        publishAllLogicRules();
     }
 
     void onDisconnect(NimBLEServer *server, NimBLEConnInfo &connInfo, int reason) override {
@@ -391,6 +412,7 @@ static void publishScheduleEntry(const ScheduleEntry &entry) {
     doc["h"] = entry.hour;
     doc["m"] = entry.minute;
     doc["d"] = entry.durationSeconds;
+    doc["n"] = (entry.durationSeconds + 59U) / 60U; // minutes, rounded up
     doc["w"] = entry.daysMask;
 
     std::string payload;
@@ -423,6 +445,298 @@ static void publishAllSchedules() {
     for (const auto &entry : schedules) {
         publishScheduleEntry(entry);
     }
+}
+
+static const char *deviceModeToString(DeviceMode mode) {
+    switch (mode) {
+    case DEVICE_MODE_SCHEDULE:
+        return "SCHEDULE";
+    case DEVICE_MODE_SCHEDULE_WITH_LOGIC:
+        return "SCHEDULE_WITH_LOGIC";
+    case DEVICE_MODE_LOGIC_ONLY:
+        return "LOGIC_ONLY";
+    default:
+        return "SCHEDULE";
+    }
+}
+
+static const char *ruleTypeToString(RuleType type) {
+    switch (type) {
+    case RULE_INHIBIT_ON:
+        return "INHIBIT_ON";
+    case RULE_FORCE_ON:
+        return "FORCE_ON";
+    default:
+        return "INHIBIT_ON";
+    }
+}
+
+static const char *ruleOpToString(RuleOp op) {
+    switch (op) {
+    case OP_GT:
+        return ">";
+    case OP_LT:
+        return "<";
+    case OP_GTE:
+        return ">=";
+    case OP_LTE:
+        return "<=";
+    default:
+        return ">";
+    }
+}
+
+static void publishDeviceMode(Zone zone) {
+    JsonDocument doc;
+    doc["e"] = "dm";
+    doc["z"] = ZONE_KEYS[zone];
+    doc["m"] = deviceModeToString(deviceModes[zone]);
+
+    std::string payload;
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+}
+
+static void publishAllDeviceModes() {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        publishDeviceMode(static_cast<Zone>(i));
+    }
+}
+
+static void publishLogicRules(Zone zone) {
+    JsonDocument clearDoc;
+    clearDoc["e"] = "lc";
+    clearDoc["z"] = ZONE_KEYS[zone];
+
+    std::string clearPayload;
+    serializeJson(clearDoc, clearPayload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(clearPayload.data()), clearPayload.size());
+        txCharacteristic->notify();
+    }
+
+    const auto &rules = deviceLogic[zone];
+    for (size_t i = 0; i < rules.size(); ++i) {
+        const auto &rule = rules[i];
+        JsonDocument doc;
+        doc["e"] = "la";
+        doc["z"] = ZONE_KEYS[zone];
+        doc["i"] = static_cast<uint16_t>(i);
+        doc["type"] = ruleTypeToString(rule.type);
+        doc["sensor"] = rule.sensor;
+        doc["op"] = ruleOpToString(rule.op);
+        doc["on"] = rule.onThreshold;
+        if (!std::isnan(rule.offThreshold)) {
+            doc["off"] = rule.offThreshold;
+        }
+
+        std::string payload;
+        serializeJson(doc, payload);
+
+        if (bleConnected && txCharacteristic != nullptr) {
+            txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+            txCharacteristic->notify();
+        }
+    }
+}
+
+static void publishAllLogicRules() {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        publishLogicRules(static_cast<Zone>(i));
+    }
+}
+
+static bool savePersistentState() {
+    if (!preferencesReady) {
+        return false;
+    }
+
+    JsonDocument doc;
+    doc["mode"] = modeToString(currentMode);
+    doc["tzm"] = timeOffsetSeconds / 60;
+
+    JsonArray schedulesArr = doc["s"].to<JsonArray>();
+    for (const auto &entry : schedules) {
+        JsonObject item = schedulesArr.add<JsonObject>();
+        item["i"] = entry.id;
+        item["z"] = ZONE_KEYS[entry.zone];
+        item["h"] = entry.hour;
+        item["m"] = entry.minute;
+        item["d"] = entry.durationSeconds;
+        item["w"] = entry.daysMask;
+    }
+
+    JsonArray modesArr = doc["dm"].to<JsonArray>();
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        modesArr.add(deviceModeToString(deviceModes[i]));
+    }
+
+    JsonObject logicObj = doc["l"].to<JsonObject>();
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        JsonArray rulesArr = logicObj[ZONE_KEYS[i]].to<JsonArray>();
+        for (const auto &rule : deviceLogic[i]) {
+            JsonObject ruleObj = rulesArr.add<JsonObject>();
+            ruleObj["type"] = ruleTypeToString(rule.type);
+            ruleObj["sensor"] = rule.sensor;
+            ruleObj["op"] = ruleOpToString(rule.op);
+            ruleObj["on"] = rule.onThreshold;
+            if (!std::isnan(rule.offThreshold)) {
+                ruleObj["off"] = rule.offThreshold;
+            }
+        }
+    }
+
+    std::string payload;
+    serializeJson(doc, payload);
+    size_t written = preferences.putBytes(PERSIST_KEY_STATE, payload.data(), payload.size());
+    if (written != payload.size()) {
+        Serial.println("Persistent save failed");
+        return false;
+    }
+
+    Serial.printf("Persistent state saved (%u bytes)\n", static_cast<unsigned>(written));
+    return true;
+}
+
+static bool loadPersistentState() {
+    if (!preferencesReady) {
+        return false;
+    }
+
+    size_t len = preferences.getBytesLength(PERSIST_KEY_STATE);
+    if (len == 0) {
+        Serial.println("No persisted state found");
+        return false;
+    }
+
+    std::vector<char> buffer(len + 1, '\0');
+    size_t read = preferences.getBytes(PERSIST_KEY_STATE, buffer.data(), len);
+    if (read != len) {
+        Serial.println("Persistent load failed");
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, buffer.data(), len);
+    if (err) {
+        Serial.print("Persistent JSON parse error: ");
+        Serial.println(err.f_str());
+        return false;
+    }
+
+    const char *modeStr = doc["mode"];
+    if (modeStr) {
+        if (equalsIgnoreCase(modeStr, "AUTO")) {
+            currentMode = MODE_AUTO;
+        } else if (equalsIgnoreCase(modeStr, "OFF")) {
+            currentMode = MODE_OFF;
+        }
+    }
+
+    int32_t tzOffsetMin = doc["tzm"] | 0;
+    setTimeOffsetMinutes(tzOffsetMin);
+
+    schedules.clear();
+    JsonArrayConst schedulesArr = doc["s"].as<JsonArrayConst>();
+    for (JsonVariantConst item : schedulesArr) {
+        if (schedules.size() >= 16) {
+            break;
+        }
+        const char *idStr = item["i"];
+        const char *zoneKey = item["z"];
+        int hour = item["h"] | -1;
+        int minute = item["m"] | -1;
+        uint32_t durationSeconds = item["d"] | 0;
+        uint8_t daysMask = item["w"] | 0;
+
+        Zone zone;
+        if (!idStr || !zoneKey || !parseZoneKey(zoneKey, zone)) {
+            continue;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || durationSeconds == 0 || daysMask == 0) {
+            continue;
+        }
+
+        ScheduleEntry entry;
+        entry.id = idStr;
+        entry.zone = zone;
+        entry.hour = static_cast<uint8_t>(hour);
+        entry.minute = static_cast<uint8_t>(minute);
+        entry.durationSeconds = durationSeconds;
+        entry.daysMask = daysMask;
+        entry.lastRunYDay = -1;
+        schedules.push_back(entry);
+    }
+
+    deviceModes.assign(Z_COUNT, DEVICE_MODE_SCHEDULE);
+    JsonArrayConst modesArr = doc["dm"].as<JsonArrayConst>();
+    if (!modesArr.isNull()) {
+        size_t idx = 0;
+        for (JsonVariantConst modeVar : modesArr) {
+            if (idx >= Z_COUNT) {
+                break;
+            }
+            const char *modeText = modeVar.as<const char *>();
+            DeviceMode parsedMode;
+            if (parseDeviceMode(modeText, parsedMode)) {
+                deviceModes[idx] = parsedMode;
+            }
+            ++idx;
+        }
+    }
+
+    deviceLogic.assign(Z_COUNT, {});
+    JsonObjectConst logicObj = doc["l"].as<JsonObjectConst>();
+    if (!logicObj.isNull()) {
+        for (size_t i = 0; i < Z_COUNT; ++i) {
+            JsonArrayConst rulesArr = logicObj[ZONE_KEYS[i]].as<JsonArrayConst>();
+            if (rulesArr.isNull()) {
+                continue;
+            }
+            for (JsonVariantConst ruleVar : rulesArr) {
+                LogicRule rule;
+                if (parseLogicRule(ruleVar, rule)) {
+                    deviceLogic[i].push_back(rule);
+                }
+            }
+        }
+    }
+
+    Serial.printf("Restored %u schedules from persistence\n", static_cast<unsigned>(schedules.size()));
+    return true;
+}
+
+static void initRtc() {
+    if (!rtc.begin()) {
+        Serial.println("RTC not detected on I2C");
+        return;
+    }
+    rtcReady = true;
+    if (rtc.lostPower()) {
+        Serial.println("RTC reports power loss; waiting for clock sync");
+        return;
+    }
+    DateTime now = rtc.now();
+    uint32_t epoch = now.unixtime();
+    if (epoch > 946684800UL) { // Jan 1, 2000 UTC
+        syncTime(epoch);
+        Serial.print("Time restored from RTC: ");
+        Serial.println(epoch);
+    } else {
+        Serial.println("RTC time invalid; waiting for clock sync");
+    }
+}
+
+static void saveTimeToRtc(uint32_t epochSeconds) {
+    if (!rtcReady || epochSeconds == 0) {
+        return;
+    }
+    rtc.adjust(DateTime(epochSeconds));
 }
 
 static void handleBleCommand(const std::string &payload) {
@@ -473,6 +787,7 @@ static void handleBleCommand(const std::string &payload) {
         }
         if (nextMode != currentMode) {
             currentMode = nextMode;
+            savePersistentState();
             publishState();
         }
     } else if (equalsIgnoreCase(cmd, "setSchedule")) {
@@ -481,7 +796,12 @@ static void handleBleCommand(const std::string &payload) {
         int hour = doc["hour"] | -1;
         int minute = doc["minute"] | -1;
         uint32_t durationSeconds = doc["duration_s"] | 0;
+        uint32_t durationMinutes = doc["duration_m"] | 0;
         JsonVariantConst daysVar = doc["days"];
+
+        if (durationSeconds == 0 && durationMinutes > 0) {
+            durationSeconds = durationMinutes * 60U;
+        }
 
         Zone zone;
         if (!parseZoneKey(zoneKey, zone)) {
@@ -509,6 +829,7 @@ static void handleBleCommand(const std::string &payload) {
         if (addOrUpdateSchedule(entry)) {
             Serial.print("Schedule saved: ");
             Serial.println(scheduleId);
+            savePersistentState();
             publishState();
             publishScheduleEntry(entry);
         }
@@ -521,6 +842,7 @@ static void handleBleCommand(const std::string &payload) {
         if (removeScheduleById(String(idStr))) {
             Serial.print("Schedule deleted: ");
             Serial.println(idStr);
+            savePersistentState();
             publishState();
             publishScheduleDelete(String(idStr));
         }
@@ -530,6 +852,8 @@ static void handleBleCommand(const std::string &payload) {
         if (epoch > 0) {
             syncTime(epoch);
             setTimeOffsetMinutes(tzOffsetMin);
+            saveTimeToRtc(epoch);
+            savePersistentState();
             publishState();
         } else {
             Serial.println("Invalid epoch");
@@ -549,6 +873,8 @@ static void handleBleCommand(const std::string &payload) {
         }
         deviceModes[zone] = mode;
         Serial.printf("Mode for %s set to %s\n", zoneKey, modeStr);
+        savePersistentState();
+        publishDeviceMode(zone);
     } else if (equalsIgnoreCase(cmd, "setLogicRules")) {
         const char *zoneKey = doc["zone"];
         Zone zone;
@@ -570,6 +896,8 @@ static void handleBleCommand(const std::string &payload) {
         }
         deviceLogic[zone] = std::move(newRules);
         Serial.printf("Loaded %u logic rules for %s\n", static_cast<unsigned>(deviceLogic[zone].size()), zoneKey);
+        savePersistentState();
+        publishLogicRules(zone);
     } else if (equalsIgnoreCase(cmd, "setSensor")) {
         const char *name = doc["name"];
         float value = doc["value"] | NAN;
@@ -579,6 +907,11 @@ static void handleBleCommand(const std::string &payload) {
         }
         sensorReadings[name] = value;
         Serial.printf("Sensor %s updated to %.2f\n", name, value);
+    } else if (equalsIgnoreCase(cmd, "syncState")) {
+        publishState();
+        publishAllSchedules();
+        publishAllDeviceModes();
+        publishAllLogicRules();
     } else if (equalsIgnoreCase(cmd, "ping")) {
         publishPong();
     } else {
@@ -873,6 +1206,13 @@ void setup() {
     Serial.println();
     Serial.println("Greenhouse controller firmware booting");
 
+    if (preferences.begin(PERSIST_NAMESPACE, false)) {
+        preferencesReady = true;
+        loadPersistentState();
+    } else {
+        Serial.println("Failed to initialize NVS preferences");
+    }
+
     unsigned long now = millis();
     for (size_t i = 0; i < Z_COUNT; ++i) {
         pinMode(ZONE_OUTPUT_PINS[i], OUTPUT);
@@ -886,8 +1226,10 @@ void setup() {
 
     dht.begin();
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    initRtc();
     displayReady = display.begin(SSD1306_SWITCHCAPVCC, DISPLAY_ADDRESS);
     if (displayReady) {
+        display.setRotation(2); // 180-degree flip for upside-down mounted OLED
         display.clearDisplay();
         display.setTextColor(SSD1306_WHITE);
         display.setTextSize(1);

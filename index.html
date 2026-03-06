@@ -15,6 +15,10 @@
       --accent-dark: #2a5a43;
       --danger: #c53030;
       --text: #1a202c;
+      --card-bg: #f8fafc;
+      --card-border: #cbd5e1;
+      --card-text: #0f172a;
+      --card-muted: #1f2937;
       font-family: "Segoe UI", Roboto, sans-serif;
     }
     body {
@@ -358,15 +362,15 @@
       gap: 0.75rem;
     }
     .schedule-card {
-      border: 1px solid #cbd5f5;
+      border: 1px solid var(--card-border);
       border-radius: 10px;
       padding: 0.75rem;
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
-      color: var(--accent);
+      color: var(--card-text);
       font-weight: 700;
-      background: #eef7ef;
+      background: var(--card-bg);
     }
     .schedule-card-header {
       display: flex;
@@ -384,10 +388,10 @@
     }
     .schedule-card-details {
       font-size: 0.9rem;
-      color: #1f2937;
+      color: var(--card-muted);
     }
     .schedule-list.empty {
-      color: #374151;
+      color: var(--card-muted);
       font-style: italic;
     }
     .logic {
@@ -438,14 +442,16 @@
       gap: 0.5rem;
     }
     .logic-rule-card {
-      border: 1px solid #cbd5f5;
+      border: 1px solid var(--card-border);
       border-radius: 10px;
       padding: 0.6rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 0.95rem;
-      color: #1f2937;
+      color: var(--card-text);
+      font-weight: 700;
+      background: var(--card-bg);
     }
     .logic-rule-card button {
       border: none;
@@ -471,6 +477,10 @@
         --accent: #25c19f;
         --accent-dark: #17a187;
         --danger: #f87171;
+        --card-bg: #0f172a;
+        --card-border: #334155;
+        --card-text: #e2e8f0;
+        --card-muted: #cbd5e1;
       }
       .mode-group {
         background: #334155;
@@ -489,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v22</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v23</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -621,8 +631,8 @@
           <input type="time" id="schedule-time" required>
         </label>
         <label>
-          Duration (s)
-          <input type="number" id="schedule-duration" min="30" max="3600" step="30" value="300" required>
+          Duration (min)
+          <input type="number" id="schedule-duration" min="1" max="240" step="1" value="5" required>
         </label>
         <fieldset>
           <legend style="font-size:0.9rem;">Days</legend>
@@ -801,9 +811,9 @@
       }
       const zone = scheduleZoneSelect.value;
       const timeValue = scheduleTimeInput.value;
-      const duration = parseInt(scheduleDurationInput.value, 10);
+      const durationMinutes = parseInt(scheduleDurationInput.value, 10);
       const days = dayCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
-      if (!timeValue || Number.isNaN(duration) || duration <= 0 || days.length === 0) {
+      if (!timeValue || Number.isNaN(durationMinutes) || durationMinutes <= 0 || days.length === 0) {
         log('Schedule form incomplete.');
         return;
       }
@@ -817,7 +827,8 @@
         zone,
         hour,
         minute,
-        duration_s: duration,
+        duration_m: durationMinutes,
+        duration_s: durationMinutes * 60,
         days
       });
       renderSchedules();
@@ -826,7 +837,8 @@
         zone,
         hour,
         minute,
-        duration_s: duration,
+        duration_m: durationMinutes,
+        duration_s: durationMinutes * 60,
         days
       });
       scheduleForm.reset();
@@ -963,6 +975,7 @@
       log('Subscribed to notifications.');
       setClockEnabled(true);
       await syncTime();
+      await sendSyncState();
       sendPing();
     }
 
@@ -988,6 +1001,12 @@
           upsertScheduleFromCompact(msg);
         } else if (msg.e === 'sd') {
           deleteScheduleById(msg.i);
+        } else if (msg.e === 'dm') {
+          applyDeviceModeUpdate(msg);
+        } else if (msg.e === 'lc') {
+          clearLogicRulesByZone(msg.z);
+        } else if (msg.e === 'la') {
+          upsertLogicRuleFromCompact(msg);
         } else if (msg.evt === 'state') {
           if (msg.mode) {
             baseMode = msg.mode;
@@ -998,8 +1017,23 @@
             applyZoneLabels(msg.zoneLabels);
           }
           if (Array.isArray(msg.schedules)) {
-            scheduleState = msg.schedules;
+            scheduleState = msg.schedules.map(normalizeScheduleEntry);
             renderSchedules();
+          }
+          if (msg.deviceModes && typeof msg.deviceModes === 'object') {
+            zoneKeys.forEach(zone => {
+              if (typeof msg.deviceModes[zone] === 'string') {
+                deviceModes[zone] = msg.deviceModes[zone];
+              }
+            });
+            renderDeviceModes();
+          }
+          if (msg.logicRules && typeof msg.logicRules === 'object') {
+            zoneKeys.forEach(zone => {
+              const rules = msg.logicRules[zone];
+              logicRules[zone] = Array.isArray(rules) ? rules : [];
+            });
+            renderLogicRules();
           }
 
           const zoneStates = msg.zones || {};
@@ -1072,7 +1106,8 @@
           } else if (info.expiresAt) {
             const remaining = Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000));
             if (remaining > 0) {
-              text = `${remaining}s`;
+              const remainingMinutes = Math.max(1, Math.ceil(remaining / 60));
+              text = `Timer: ${remainingMinutes} min`;
             }
           }
         }
@@ -1088,6 +1123,10 @@
 
     async function sendPing() {
       await sendJson({ cmd: 'ping' });
+    }
+
+    async function sendSyncState() {
+      await sendJson({ cmd: 'syncState' });
     }
 
     async function sendJson(obj) {
@@ -1182,6 +1221,56 @@
       });
     }
 
+    function applyDeviceModeUpdate(msg) {
+      const zone = msg && msg.z;
+      const mode = msg && msg.m;
+      if (!zone || typeof mode !== 'string' || !zoneKeys.includes(zone)) {
+        return;
+      }
+      deviceModes[zone] = mode;
+      renderDeviceModes();
+    }
+
+    function clearLogicRulesByZone(zone) {
+      if (!zone || !zoneKeys.includes(zone)) {
+        return;
+      }
+      logicRules[zone] = [];
+      renderLogicRules();
+    }
+
+    function upsertLogicRuleFromCompact(msg) {
+      const zone = msg && msg.z;
+      if (!zone || !zoneKeys.includes(zone)) {
+        return;
+      }
+      const onThreshold = Number(msg.on);
+      if (!msg.type || !msg.sensor || !msg.op || Number.isNaN(onThreshold)) {
+        return;
+      }
+      const rule = {
+        type: msg.type,
+        sensor: msg.sensor,
+        op: msg.op,
+        on: onThreshold
+      };
+      if (msg.off !== undefined && msg.off !== null) {
+        const offThreshold = Number(msg.off);
+        if (!Number.isNaN(offThreshold)) {
+          rule.off = offThreshold;
+        }
+      }
+      const idx = Number(msg.i);
+      logicRules[zone] = logicRules[zone] || [];
+      if (Number.isInteger(idx) && idx >= 0) {
+        logicRules[zone][idx] = rule;
+      } else {
+        logicRules[zone].push(rule);
+      }
+      logicRules[zone] = logicRules[zone].filter(Boolean);
+      renderLogicRules();
+    }
+
     let deviceEpochSeconds = 0;
     let deviceEpochUpdatedMs = 0;
     const sensorState = {
@@ -1216,15 +1305,16 @@
     function upsertScheduleFromCompact(msg) {
       if (!msg || !msg.i) return;
       const idx = scheduleState.findIndex(s => s.id === msg.i);
-      const entry = {
+      const entry = normalizeScheduleEntry({
         id: msg.i,
         zone: msg.z,
         hour: Number(msg.h || 0),
         minute: Number(msg.m || 0),
+        duration_m: Number(msg.n || 0),
         duration_s: Number(msg.d || 0),
         daysMask: Number(msg.w || 0),
         days: msg.days
-      };
+      });
       if (idx >= 0) {
         scheduleState[idx] = entry;
       } else {
@@ -1251,6 +1341,24 @@
         if (mask & (1 << idx)) picked.push(name);
       });
       return picked.length ? picked.join(', ') : 'Daily';
+    }
+
+    function normalizeScheduleEntry(entry) {
+      const seconds = Number(entry.duration_s || 0);
+      let minutes = Number(entry.duration_m || 0);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        if (seconds > 0) {
+          minutes = Math.max(1, Math.ceil(seconds / 60));
+        } else {
+          minutes = 0;
+        }
+      }
+      const durationSeconds = seconds > 0 ? seconds : minutes * 60;
+      return {
+        ...entry,
+        duration_m: minutes,
+        duration_s: durationSeconds
+      };
     }
 
     function applySensorSnapshot(sensors) {
@@ -1295,7 +1403,8 @@
         card.className = 'schedule-card';
         const label = zoneLabels[entry.zone] || zoneDefaults[entry.zone] || entry.zone;
         const time = `${String(entry.hour).padStart(2, '0')}:${String(entry.minute).padStart(2, '0')}`;
-        const durationText = `${entry.duration_s} sec`;
+        const durationMinutes = normalizeScheduleEntry(entry).duration_m;
+        const durationText = `${durationMinutes} min`;
         const daysText = formatDays(entry);
         card.innerHTML = `
           <div class="schedule-card-header">
@@ -1330,7 +1439,7 @@
       if (total === 0) {
         const empty = document.createElement('div');
         empty.textContent = 'No logic rules yet.';
-        empty.style.color = '#374151';
+        empty.style.color = 'var(--card-muted)';
         logicRulesContainer.appendChild(empty);
       }
     }
