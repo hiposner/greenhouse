@@ -49,6 +49,13 @@ enum RuleOp {
     OP_LTE
 };
 
+enum RunSource {
+    RUN_NONE = 0,
+    RUN_MANUAL,
+    RUN_SCHEDULE,
+    RUN_LOGIC
+};
+
 static const uint8_t ZONE_OUTPUT_PINS[Z_COUNT] = {
     PIN_OUT_LINE1,
     PIN_OUT_LINE2,
@@ -112,6 +119,8 @@ static uint32_t defaultManualDuration(Zone zone) {
 struct ZoneState {
     bool on = false;
     bool manual = false;
+    bool scheduleActive = false;
+    RunSource source = RUN_NONE;
     uint32_t safetyUntilMs = 0;
     bool buttonStableState = true;
     bool buttonLastReading = true;
@@ -202,7 +211,7 @@ static bool loadPersistentState();
 static bool savePersistentState();
 static void initRtc();
 static void saveTimeToRtc(uint32_t epochSeconds);
-static bool setZone(Zone zone, bool on, uint32_t durationSeconds = 0, bool manual = false);
+static bool setZone(Zone zone, bool on, uint32_t durationSeconds = 0, bool manual = false, RunSource source = RUN_NONE);
 static void digitalWriteActive(uint8_t pin, bool on);
 static bool parseZoneKey(const char *key, Zone &zone);
 static const char *modeToString(ControlMode mode);
@@ -317,7 +326,7 @@ static void applyZoneOutput(Zone zone, bool on) {
     zoneStates[zone].on = on;
 }
 
-static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
+static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual, RunSource source) {
     bool stateChanged = false;
     unsigned long now = millis();
     // Interlock removed: multiple irrigation lines may run simultaneously.
@@ -330,6 +339,16 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
 
     if (on) {
         zoneStates[zone].manual = manual;
+        RunSource newSource = manual ? RUN_MANUAL : source;
+        if (zoneStates[zone].source != newSource) {
+            zoneStates[zone].source = newSource;
+            stateChanged = true;
+        }
+        bool newScheduleActive = (!manual && newSource == RUN_SCHEDULE);
+        if (zoneStates[zone].scheduleActive != newScheduleActive) {
+            zoneStates[zone].scheduleActive = newScheduleActive;
+            stateChanged = true;
+        }
         uint32_t targetSeconds = durationSeconds;
         if (targetSeconds == 0 && manual) {
             targetSeconds = defaultManualDuration(zone);
@@ -349,6 +368,14 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual) {
         }
         if (zoneStates[zone].manual) {
             zoneStates[zone].manual = false;
+            stateChanged = true;
+        }
+        if (zoneStates[zone].scheduleActive) {
+            zoneStates[zone].scheduleActive = false;
+            stateChanged = true;
+        }
+        if (zoneStates[zone].source != RUN_NONE) {
+            zoneStates[zone].source = RUN_NONE;
             stateChanged = true;
         }
     }
@@ -381,6 +408,7 @@ static void publishState() {
     JsonArray remaining = doc["r"].to<JsonArray>();
     JsonArray overrides = doc["v"].to<JsonArray>();
     JsonArray modes = doc["k"].to<JsonArray>(); // device modes: 0=schedule,1=schedule+logic,2=logic-only
+    JsonArray sources = doc["u"].to<JsonArray>(); // run source: 0=none,1=manual,2=schedule,3=logic
     for (size_t i = 0; i < Z_COUNT; ++i) {
         states.add(zoneStates[i].on ? 1 : 0);
         if (zoneStates[i].on && zoneStates[i].safetyUntilMs > nowMs) {
@@ -390,6 +418,7 @@ static void publishState() {
         }
         overrides.add(zoneStates[i].manual ? 1 : 0);
         modes.add(static_cast<uint8_t>(deviceModes[i]));
+        sources.add(static_cast<uint8_t>(zoneStates[i].source));
     }
 
     // Include sensor readings when available so the UI can display them.
@@ -911,7 +940,7 @@ static void handleBleCommand(const std::string &payload) {
             return;
         }
         bool turnOn = equalsIgnoreCase(stateStr, "ON");
-        setZone(zone, turnOn, durationSeconds, true);
+        setZone(zone, turnOn, durationSeconds, true, RUN_MANUAL);
     } else if (equalsIgnoreCase(cmd, "setMode")) {
         const char *modeStr = doc["mode"];
         if (!modeStr) {
@@ -1240,7 +1269,7 @@ static void pollZoneButtons(unsigned long now) {
                 if (!reading) { // active low
                     bool turnOn = !state.on;
                     Serial.printf("Button toggle for %s -> %s\n", ZONE_KEYS[i], turnOn ? "ON" : "OFF");
-                    setZone(static_cast<Zone>(i), turnOn, 0, true);
+                    setZone(static_cast<Zone>(i), turnOn, 0, true, RUN_MANUAL);
                 }
             }
         }
@@ -1329,7 +1358,7 @@ static void evaluateSchedules() {
             if (entry.lastRunYDay != timeinfo.tm_yday) {
                 Serial.printf("Schedule %s running %s\n", entry.id.c_str(), ZONE_KEYS[entry.zone]);
                 entry.lastRunYDay = timeinfo.tm_yday;
-                setZone(entry.zone, true, entry.durationSeconds, false);
+                setZone(entry.zone, true, entry.durationSeconds, false, RUN_SCHEDULE);
             }
         } else if (entry.lastRunYDay != timeinfo.tm_yday &&
                    (entry.hour * 60 + entry.minute) > minuteOfDay) {
@@ -1436,7 +1465,7 @@ static void applyModeAndPriority(unsigned long now) {
             continue;
         }
 
-        const bool scheduleIntent = zoneStates[i].on && !zoneStates[i].manual;
+        const bool scheduleIntent = zoneStates[i].scheduleActive && !zoneStates[i].manual;
         const auto logic = evaluateLogic(i);
 
         bool desired = zoneStates[i].on;
@@ -1464,7 +1493,18 @@ static void applyModeAndPriority(unsigned long now) {
         if (desired != zoneStates[i].on) {
             // For logic-driven ON without a schedule intent, bound the run time.
             uint32_t duration = (desired && !scheduleIntent) ? DEFAULT_MANUAL_SECS : 0;
-            setZone(static_cast<Zone>(i), desired, duration, false);
+            RunSource source = RUN_NONE;
+            if (desired) {
+                source = scheduleIntent ? RUN_SCHEDULE : RUN_LOGIC;
+            }
+            setZone(static_cast<Zone>(i), desired, duration, false, source);
+        } else if (desired && !zoneStates[i].manual) {
+            // Keep source aligned while ON even if state didn't toggle this loop.
+            RunSource source = scheduleIntent ? RUN_SCHEDULE : RUN_LOGIC;
+            if (zoneStates[i].source != source) {
+                zoneStates[i].source = source;
+                publishState();
+            }
         }
     }
 }

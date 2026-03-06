@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v28</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v29</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -743,6 +743,7 @@
     let awaitingSyncSnapshot = false;
     let syncRetryCount = 0;
     let syncSnapshotSawBegin = false;
+    let syncHydrated = false;
     setInterval(updateCountdowns, 1000);
     setInterval(updateClockDisplay, 1000);
 
@@ -809,10 +810,14 @@
       }
     });
 
-    scheduleForm.addEventListener('submit', event => {
+    scheduleForm.addEventListener('submit', async event => {
       event.preventDefault();
       if (!rxCharacteristic) {
         log('Not connected.');
+        return;
+      }
+      if (!syncHydrated) {
+        log('Waiting for device sync. Try again in a moment.');
         return;
       }
       const zone = scheduleZoneSelect.value;
@@ -827,8 +832,7 @@
       const hour = parseInt(hourStr, 10);
       const minute = parseInt(minuteStr, 10);
       const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sched-${Date.now()}`;
-      // Optimistically add to list; device will echo compact schedule event.
-      scheduleState.push({
+      await sendSetSchedule({
         id,
         zone,
         hour,
@@ -837,16 +841,7 @@
         duration_s: durationMinutes * 60,
         days
       });
-      renderSchedules();
-      sendSetSchedule({
-        id,
-        zone,
-        hour,
-        minute,
-        duration_m: durationMinutes,
-        duration_s: durationMinutes * 60,
-        days
-      });
+      log('Schedule sent. Waiting for device confirmation...');
       scheduleForm.reset();
     });
 
@@ -860,19 +855,28 @@
     });
 
     deviceModeSelects.forEach(select => {
-      select.addEventListener('change', () => {
+      select.addEventListener('change', async () => {
+        if (!syncHydrated) {
+          log('Waiting for device sync. Try again in a moment.');
+          renderDeviceModes();
+          return;
+        }
         const zone = select.getAttribute('data-zone');
         const mode = select.value;
         if (!zone) return;
         deviceModes[zone] = mode;
         renderDeviceModes();
-        sendSetDeviceMode(zone, mode);
+        await sendSetDeviceMode(zone, mode);
       });
     });
 
     if (logicForm) {
-      logicForm.addEventListener('submit', event => {
+      logicForm.addEventListener('submit', async event => {
         event.preventDefault();
+        if (!syncHydrated) {
+          log('Waiting for device sync. Try again in a moment.');
+          return;
+        }
         const zone = logicZoneSelect.value;
         const type = logicTypeSelect.value;
         const sensor = logicSensorSelect.value;
@@ -887,24 +891,27 @@
         if (!Number.isNaN(offVal)) {
           rule.off = offVal;
         }
-        logicRules[zone] = logicRules[zone] || [];
-        logicRules[zone].push(rule);
-        renderLogicRules();
-        sendSetLogicRules(zone, logicRules[zone]);
+        const nextRules = [...(logicRules[zone] || []), rule];
+        await sendSetLogicRules(zone, nextRules);
+        log('Logic rule sent. Waiting for device confirmation...');
         logicForm.reset();
       });
     }
 
     if (logicRulesContainer) {
-      logicRulesContainer.addEventListener('click', event => {
+      logicRulesContainer.addEventListener('click', async event => {
         const btn = event.target.closest('button[data-zone][data-index]');
         if (!btn) return;
+        if (!syncHydrated) {
+          log('Waiting for device sync. Try again in a moment.');
+          return;
+        }
         const zone = btn.dataset.zone;
         const idx = parseInt(btn.dataset.index, 10);
         if (!zone || Number.isNaN(idx)) return;
-        logicRules[zone] = (logicRules[zone] || []).filter((_, i) => i !== idx);
-        renderLogicRules();
-        sendSetLogicRules(zone, logicRules[zone]);
+        const nextRules = (logicRules[zone] || []).filter((_, i) => i !== idx);
+        await sendSetLogicRules(zone, nextRules);
+        log('Logic delete sent. Waiting for device confirmation...');
       });
     }
 
@@ -981,6 +988,7 @@
       log('Subscribed to notifications.');
       setClockEnabled(true);
       await syncTime();
+      syncHydrated = false;
       await requestSyncSnapshot();
       sendPing();
     }
@@ -990,6 +998,7 @@
       syncSnapshotActive = false;
       awaitingSyncSnapshot = false;
       syncSnapshotSawBegin = false;
+      syncHydrated = false;
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
         syncSnapshotTimer = null;
@@ -1060,11 +1069,13 @@
           const zoneStates = msg.zones || {};
           const remaining = msg.remaining || {};
           const overrides = msg.overrides || {};
+          const sources = msg.sources || {};
           zoneKeys.forEach(zone => {
             const state = zoneStates[zone] || 'OFF';
             const remainingSeconds = Number(remaining[zone] || 0);
             const override = Boolean(overrides[zone]);
-            updateZoneCard(zone, state, remainingSeconds, override);
+            const source = Number(sources[zone] || 0);
+            updateZoneCard(zone, state, remainingSeconds, override, source);
           });
         } else if (msg.evt === 'pong') {
           log('Pong received.');
@@ -1074,7 +1085,7 @@
       }
     }
 
-    function updateZoneCard(zone, state, remainingSeconds, override) {
+    function updateZoneCard(zone, state, remainingSeconds, override, sourceCode = 0) {
       const card = statusCards.find(card => card.getAttribute('data-zone') === zone);
       if (!card) {
         return;
@@ -1086,23 +1097,41 @@
       const stateLabel = card.querySelector('.status-state');
       if (stateLabel) {
         stateLabel.dataset.state = normalized;
-        stateLabel.textContent = normalized;
+        if (normalized === 'ON' && sourceCode !== 1) {
+          stateLabel.textContent = 'RUN';
+        } else {
+          stateLabel.textContent = normalized;
+        }
       }
 
-      setZoneRuntime(zone, normalized === 'ON' ? remainingSeconds : 0, override);
+      setZoneRuntime(zone, normalized === 'ON' ? remainingSeconds : 0, override, sourceCode);
       refreshZoneCountdown(zone);
 
       const overrideEl = card.querySelector('.status-override');
       if (overrideEl) {
-        overrideEl.textContent = override ? 'Manual override' : 'Automatic control';
+        let sourceText = 'Automatic control';
+        if (normalized === 'ON') {
+          if (override || sourceCode === 1) {
+            sourceText = 'Manual';
+          } else if (sourceCode === 2) {
+            sourceText = 'Schedule';
+          } else if (sourceCode === 3) {
+            sourceText = 'Logic';
+          } else {
+            sourceText = 'Run';
+          }
+        }
+        overrideEl.textContent = sourceText;
       }
     }
 
-    function setZoneRuntime(zone, remainingSeconds, override) {
+    function setZoneRuntime(zone, remainingSeconds, override, sourceCode = 0) {
       if (remainingSeconds > 0) {
-        zoneRuntime[zone] = { expiresAt: Date.now() + remainingSeconds * 1000 };
-      } else if (override) {
-        zoneRuntime[zone] = { latched: true };
+        zoneRuntime[zone] = { expiresAt: Date.now() + remainingSeconds * 1000, source: sourceCode || (override ? 1 : 0) };
+      } else if (override || sourceCode === 1) {
+        zoneRuntime[zone] = { latched: true, source: 1 };
+      } else if (sourceCode === 2 || sourceCode === 3) {
+        zoneRuntime[zone] = { source: sourceCode };
       } else {
         delete zoneRuntime[zone];
       }
@@ -1123,13 +1152,25 @@
       if (state === 'ON') {
         if (info) {
           if (info.latched) {
-            text = 'Timer: latched';
+            text = 'Manual';
           } else if (info.expiresAt) {
             const remaining = Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000));
             if (remaining > 0) {
               const remainingMinutes = Math.max(1, Math.ceil(remaining / 60));
-              text = `Timer: ${remainingMinutes} min`;
+              if (info.source === 1) {
+                text = `Manual: ${remainingMinutes} min`;
+              } else if (info.source === 3) {
+                text = `Logic: ${remainingMinutes} min`;
+              } else {
+                text = `Timer: ${remainingMinutes} min`;
+              }
             }
+          } else if (info.source === 3) {
+            text = 'Logic run';
+          } else if (info.source === 2) {
+            text = 'Scheduled run';
+          } else if (info.source === 1) {
+            text = 'Manual';
           }
         }
       } else if (info && !info.latched) {
@@ -1154,6 +1195,7 @@
       awaitingSyncSnapshot = true;
       syncRetryCount = 0;
       syncSnapshotSawBegin = false;
+      syncHydrated = false;
       await sendSyncState();
       scheduleSyncRetry();
     }
@@ -1169,6 +1211,7 @@
         if (syncRetryCount >= 3) {
           log('Sync snapshot incomplete after retries.');
           awaitingSyncSnapshot = false;
+          syncHydrated = false;
           return;
         }
         syncRetryCount += 1;
@@ -1251,6 +1294,7 @@
       const remaining = Array.isArray(msg.r) ? msg.r : [];
       const overrides = Array.isArray(msg.v) ? msg.v : [];
       const modes = Array.isArray(msg.k) ? msg.k : [];
+      const sources = Array.isArray(msg.u) ? msg.u : [];
       if (typeof msg.m === 'number') {
         baseMode = msg.m === 1 ? 'AUTO' : 'OFF';
         setModeControlValue(baseMode);
@@ -1266,7 +1310,8 @@
         const state = zones[idx] === 1 ? 'ON' : 'OFF';
         const remainingSeconds = Number(remaining[idx] || 0);
         const override = Boolean(overrides[idx]);
-        updateZoneCard(zone, state, remainingSeconds, override);
+        const sourceCode = Number(sources[idx] || 0);
+        updateZoneCard(zone, state, remainingSeconds, override, sourceCode);
         const modeCode = Number(modes[idx]);
         if (modeCode === 0) {
           deviceModes[zone] = 'SCHEDULE';
@@ -1395,6 +1440,7 @@
     function beginSyncSnapshot() {
       syncSnapshotSawBegin = true;
       awaitingSyncSnapshot = true;
+      syncHydrated = false;
       syncSnapshotActive = true;
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
@@ -1433,6 +1479,7 @@
       syncSnapshotActive = false;
       if (hadBegin) {
         awaitingSyncSnapshot = false;
+        syncHydrated = true;
         if (syncRetryTimer) {
           clearTimeout(syncRetryTimer);
           syncRetryTimer = null;
