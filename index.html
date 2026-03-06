@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v24</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v25</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -737,6 +737,7 @@
     const zoneRuntime = {};
     let deviceModes = {};
     const logicRules = {};
+    let syncSnapshotActive = false;
     setInterval(updateCountdowns, 1000);
     setInterval(updateClockDisplay, 1000);
 
@@ -975,7 +976,7 @@
       log('Subscribed to notifications.');
       setClockEnabled(true);
       await syncTime();
-      await sendSyncState();
+      await requestSyncSnapshot();
       sendPing();
     }
 
@@ -997,6 +998,10 @@
         const msg = JSON.parse(json);
         if (msg.e === 's') {
           applyCompactState(msg);
+        } else if (msg.e === 'sb') {
+          beginSyncSnapshot();
+        } else if (msg.e === 'se') {
+          endSyncSnapshot();
         } else if (msg.e === 'sc') {
           upsertScheduleFromCompact(msg);
         } else if (msg.e === 'sd') {
@@ -1129,6 +1134,17 @@
       await sendJson({ cmd: 'syncState' });
     }
 
+    async function requestSyncSnapshot() {
+      await sendSyncState();
+      await sleep(250);
+      // Retry once in case notifications were dropped during reconnect settle.
+      await sendSyncState();
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async function sendJson(obj) {
       if (!rxCharacteristic) {
         return;
@@ -1228,7 +1244,9 @@
         return;
       }
       deviceModes[zone] = mode;
-      renderDeviceModes();
+      if (!syncSnapshotActive) {
+        renderDeviceModes();
+      }
     }
 
     function clearLogicRulesByZone(zone) {
@@ -1236,7 +1254,9 @@
         return;
       }
       logicRules[zone] = [];
-      renderLogicRules();
+      if (!syncSnapshotActive) {
+        renderLogicRules();
+      }
     }
 
     function upsertLogicRuleFromCompact(msg) {
@@ -1268,7 +1288,9 @@
         logicRules[zone].push(rule);
       }
       logicRules[zone] = logicRules[zone].filter(Boolean);
-      renderLogicRules();
+      if (!syncSnapshotActive) {
+        renderLogicRules();
+      }
     }
 
     let deviceEpochSeconds = 0;
@@ -1320,12 +1342,32 @@
       } else {
         scheduleState.push(entry);
       }
-      renderSchedules();
+      if (!syncSnapshotActive) {
+        renderSchedules();
+      }
     }
 
     function deleteScheduleById(id) {
       if (!id) return;
       scheduleState = scheduleState.filter(s => s.id !== id);
+      if (!syncSnapshotActive) {
+        renderSchedules();
+      }
+    }
+
+    function beginSyncSnapshot() {
+      syncSnapshotActive = true;
+      scheduleState = [];
+      zoneKeys.forEach(zone => {
+        deviceModes[zone] = 'SCHEDULE';
+        logicRules[zone] = [];
+      });
+    }
+
+    function endSyncSnapshot() {
+      syncSnapshotActive = false;
+      renderDeviceModes();
+      renderLogicRules();
       renderSchedules();
     }
 

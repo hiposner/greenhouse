@@ -173,6 +173,7 @@ static void publishDeviceMode(Zone zone);
 static void publishAllDeviceModes();
 static void publishLogicRules(Zone zone);
 static void publishAllLogicRules();
+static void publishSyncBoundary(bool begin);
 static void publishPong();
 static void handleBleCommand(const std::string &payload);
 static bool loadPersistentState();
@@ -551,6 +552,17 @@ static void publishAllLogicRules() {
     }
 }
 
+static void publishSyncBoundary(bool begin) {
+    JsonDocument doc;
+    doc["e"] = begin ? "sb" : "se";
+    std::string payload;
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+}
+
 static bool savePersistentState() {
     if (!preferencesReady) {
         return false;
@@ -908,10 +920,12 @@ static void handleBleCommand(const std::string &payload) {
         sensorReadings[name] = value;
         Serial.printf("Sensor %s updated to %.2f\n", name, value);
     } else if (equalsIgnoreCase(cmd, "syncState")) {
+        publishSyncBoundary(true);
         publishState();
         publishAllSchedules();
         publishAllDeviceModes();
         publishAllLogicRules();
+        publishSyncBoundary(false);
     } else if (equalsIgnoreCase(cmd, "ping")) {
         publishPong();
     } else {
