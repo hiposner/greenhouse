@@ -193,14 +193,15 @@ static const NimBLEUUID TX_UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
 
 // Forward declarations
 static void publishState();
-static void publishScheduleClear();
 static void publishScheduleEntry(const ScheduleEntry &entry);
 static void publishScheduleDelete(const String &id);
+static void publishAllSchedules();
 static void publishDeviceMode(Zone zone);
+static void publishAllDeviceModes();
 static void publishLogicClear(Zone zone);
 static void publishLogicRule(Zone zone, size_t ruleIndex);
 static void publishLogicRules(Zone zone);
-static void publishScheduleSnapshot();
+static void publishAllLogicRules();
 static void publishSyncBoundary(bool begin);
 static void publishSensorSnapshot();
 static void publishPong();
@@ -219,6 +220,7 @@ static const char *modeToString(ControlMode mode);
 static bool equalsIgnoreCase(const char *a, const char *b);
 static void pollZoneButtons(unsigned long now);
 static bool parseDaysMask(const JsonVariantConst &value, uint8_t &mask);
+static void daysMaskToJson(uint8_t mask, JsonArray &out);
 static void evaluateSchedules();
 static bool addOrUpdateSchedule(const ScheduleEntry &entry);
 static bool removeScheduleById(const String &id);
@@ -230,7 +232,7 @@ static bool manualOverrideActive();
 struct LogicResult { bool forceOn = false; bool inhibitOn = false; };
 static LogicResult evaluateLogic(size_t zoneIndex);
 static bool evaluateRule(const LogicRule &rule, float value);
-static void applyModeAndPriority();
+static void applyModeAndPriority(unsigned long now);
 static float getSensorValue(const String &name, bool &valid);
 static bool parseDeviceMode(const char *text, DeviceMode &outMode);
 static const char *deviceModeToString(DeviceMode mode);
@@ -241,8 +243,7 @@ static void pollSensors(unsigned long now);
 static void pollClimateSensors(unsigned long now, bool &shouldPublish);
 static void pollSoilSensors(unsigned long now, bool &shouldPublish);
 static bool valueChanged(float previous, float current, float delta);
-static void updateDisplay();
-static void reserveRuntimeStorage();
+static void updateDisplay(bool force);
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override {
@@ -389,31 +390,6 @@ static bool setZone(Zone zone, bool on, uint32_t durationSeconds, bool manual, R
 
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
-static void notifyBlePayload(const char *payload, size_t len) {
-    if (bleConnected && txCharacteristic != nullptr) {
-        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload), len);
-        txCharacteristic->notify();
-    }
-}
-
-static void notifyBlePayload(const std::string &payload) {
-    notifyBlePayload(payload.data(), payload.size());
-}
-
-static void serializeJsonPayload(const JsonDocument &doc, std::string &payload) {
-    payload.clear();
-    payload.reserve(measureJson(doc));
-    serializeJson(doc, payload);
-}
-
-static void reserveRuntimeStorage() {
-    schedules.reserve(16);
-    sensorReadings.reserve(8);
-    for (auto &rules : deviceLogic) {
-        rules.reserve(4);
-    }
-}
-
 static void publishState() {
     // Compact state payload (arrays) to stay under conservative MTU limits.
     JsonDocument doc;
@@ -448,9 +424,12 @@ static void publishState() {
     }
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
+    serializeJson(doc, payload);
 
-    notifyBlePayload(payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 
     Serial.print("State event: ");
     Serial.println(payload.c_str());
@@ -476,17 +455,11 @@ static void publishSensorSnapshot() {
     }
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
-}
-
-static void publishScheduleClear() {
-    JsonDocument doc;
-    doc["e"] = "sx";
-
-    std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 }
 
 static void publishPong() {
@@ -496,7 +469,10 @@ static void publishPong() {
     char buffer[96];
     size_t len = serializeJson(doc, buffer, sizeof(buffer));
 
-    notifyBlePayload(buffer, len);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(buffer), len);
+        txCharacteristic->notify();
+    }
 
     Serial.println("Responded with pong");
 }
@@ -513,8 +489,12 @@ static void publishScheduleEntry(const ScheduleEntry &entry) {
     doc["w"] = entry.daysMask;
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 
     Serial.print("Schedule event: ");
     Serial.println(payload.c_str());
@@ -525,14 +505,16 @@ static void publishScheduleDelete(const String &id) {
     doc["e"] = "sd";
     doc["i"] = id;
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
     Serial.print("Schedule delete: ");
     Serial.println(id);
 }
 
-static void publishScheduleSnapshot() {
-    publishScheduleClear();
+static void publishAllSchedules() {
     for (const auto &entry : schedules) {
         publishScheduleEntry(entry);
     }
@@ -584,8 +566,18 @@ static void publishDeviceMode(Zone zone) {
     doc["m"] = deviceModeToString(deviceModes[zone]);
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
+}
+
+static void publishAllDeviceModes() {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        publishDeviceMode(static_cast<Zone>(i));
+    }
 }
 
 static void publishLogicClear(Zone zone) {
@@ -594,8 +586,12 @@ static void publishLogicClear(Zone zone) {
     clearDoc["z"] = ZONE_KEYS[zone];
 
     std::string clearPayload;
-    serializeJsonPayload(clearDoc, clearPayload);
-    notifyBlePayload(clearPayload);
+    serializeJson(clearDoc, clearPayload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(clearPayload.data()), clearPayload.size());
+        txCharacteristic->notify();
+    }
 }
 
 static void publishLogicRule(Zone zone, size_t ruleIndex) {
@@ -620,8 +616,12 @@ static void publishLogicRule(Zone zone, size_t ruleIndex) {
     }
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 }
 
 static void publishLogicRules(Zone zone) {
@@ -632,12 +632,21 @@ static void publishLogicRules(Zone zone) {
     }
 }
 
+static void publishAllLogicRules() {
+    for (size_t i = 0; i < Z_COUNT; ++i) {
+        publishLogicRules(static_cast<Zone>(i));
+    }
+}
+
 static void publishSyncBoundary(bool begin) {
     JsonDocument doc;
     doc["e"] = begin ? "sb" : "se";
     std::string payload;
-    serializeJsonPayload(doc, payload);
-    notifyBlePayload(payload);
+    serializeJson(doc, payload);
+    if (bleConnected && txCharacteristic != nullptr) {
+        txCharacteristic->setValue(reinterpret_cast<const uint8_t *>(payload.data()), payload.size());
+        txCharacteristic->notify();
+    }
 }
 
 static void resetSyncReplayState() {
@@ -778,7 +787,7 @@ static bool savePersistentState() {
     }
 
     std::string payload;
-    serializeJsonPayload(doc, payload);
+    serializeJson(doc, payload);
     size_t written = preferences.putBytes(PERSIST_KEY_STATE, payload.data(), payload.size());
     if (written != payload.size()) {
         Serial.println("Persistent save failed");
@@ -876,12 +885,7 @@ static bool loadPersistentState() {
         }
     }
 
-    if (deviceLogic.size() != Z_COUNT) {
-        deviceLogic.resize(Z_COUNT);
-    }
-    for (auto &rules : deviceLogic) {
-        rules.clear();
-    }
+    deviceLogic.assign(Z_COUNT, {});
     JsonObjectConst logicObj = doc["l"].as<JsonObjectConst>();
     if (!logicObj.isNull()) {
         for (size_t i = 0; i < Z_COUNT; ++i) {
@@ -1022,7 +1026,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.println(scheduleId);
             savePersistentState();
             publishState();
-            publishScheduleSnapshot();
+            publishScheduleEntry(entry);
         }
     } else if (equalsIgnoreCase(cmd, "deleteSchedule")) {
         const char *idStr = doc["id"];
@@ -1035,7 +1039,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.println(idStr);
             savePersistentState();
             publishState();
-            publishScheduleSnapshot();
+            publishScheduleDelete(String(idStr));
         }
     } else if (equalsIgnoreCase(cmd, "setTime")) {
         uint32_t epoch = doc["epoch"] | 0;
@@ -1079,7 +1083,6 @@ static void handleBleCommand(const std::string &payload) {
             return;
         }
         std::vector<LogicRule> newRules;
-        newRules.reserve(rulesArr.size());
         for (JsonVariantConst item : rulesArr) {
             LogicRule rule;
             if (parseLogicRule(item, rule)) {
@@ -1136,6 +1139,17 @@ static bool parseDaysMask(const JsonVariantConst &value, uint8_t &mask) {
     return mask != 0;
 }
 
+static void daysMaskToJson(uint8_t mask, JsonArray &out) {
+    if (mask == 0) {
+        return;
+    }
+    for (size_t i = 0; i < 7; ++i) {
+        if (mask & (1 << i)) {
+            out.add(DAY_NAMES[i]);
+        }
+    }
+}
+
 static bool manualOverrideActive() {
     for (size_t i = 0; i < Z_COUNT; ++i) {
         if (zoneStates[i].manual && zoneStates[i].on) {
@@ -1170,8 +1184,8 @@ static LogicResult evaluateLogic(size_t zoneIndex) {
     if (zoneIndex >= deviceLogic.size()) {
         return result;
     }
-    auto &rules = deviceLogic[zoneIndex];
-    for (auto &rule : rules) {
+    const auto &rules = deviceLogic[zoneIndex];
+    for (auto &rule : const_cast<std::vector<LogicRule>&>(rules)) {
         bool valid = false;
         float value = getSensorValue(rule.sensor, valid);
         if (!valid || std::isnan(rule.onThreshold)) {
@@ -1383,7 +1397,6 @@ void setup() {
     }
     Serial.println();
     Serial.println("Greenhouse controller firmware booting");
-    reserveRuntimeStorage();
 
     if (preferences.begin(PERSIST_NAMESPACE, false)) {
         preferencesReady = true;
@@ -1460,14 +1473,14 @@ void loop() {
 
     pollZoneButtons(now);
 
-    applyModeAndPriority();
+    applyModeAndPriority(now);
     serviceSyncReplay(now);
 
     delay(10);
 }
 
-static void applyModeAndPriority() {
-    bool publishPending = false;
+static void applyModeAndPriority(unsigned long now) {
+    (void)now;
     for (size_t i = 0; i < Z_COUNT; ++i) {
         const auto mode = deviceModes[i];
         // Manual overrides always win; skip logic when manual and ON.
@@ -1513,12 +1526,9 @@ static void applyModeAndPriority() {
             RunSource source = scheduleIntent ? RUN_SCHEDULE : RUN_LOGIC;
             if (zoneStates[i].source != source) {
                 zoneStates[i].source = source;
-                publishPending = true;
+                publishState();
             }
         }
-    }
-    if (publishPending) {
-        publishState();
     }
 }
 
@@ -1590,12 +1600,13 @@ static void pollSensors(unsigned long now) {
     }
 
     if (shouldPublish || (displayReady && (now - lastDisplayMs) >= DISPLAY_REFRESH_MS)) {
-        updateDisplay();
+        updateDisplay(shouldPublish);
         lastDisplayMs = now;
     }
 }
 
-static void updateDisplay() {
+static void updateDisplay(bool force) {
+    (void)force;
     if (!displayReady) {
         return;
     }

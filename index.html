@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v37</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v31</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -740,7 +740,6 @@
     let syncSnapshotActive = false;
     let syncSnapshotTimer = null;
     let syncRetryTimer = null;
-    let postWriteSyncTimer = null;
     let awaitingSyncSnapshot = false;
     let syncRetryCount = 0;
     let syncSnapshotSawBegin = false;
@@ -843,7 +842,6 @@
         days
       });
       log('Schedule sent. Waiting for device confirmation...');
-      queuePostWriteSync();
       scheduleForm.reset();
     });
 
@@ -854,7 +852,6 @@
       }
       const { id } = button.dataset;
       sendDeleteSchedule(id);
-      queuePostWriteSync();
     });
 
     deviceModeSelects.forEach(select => {
@@ -1010,10 +1007,6 @@
         clearTimeout(syncRetryTimer);
         syncRetryTimer = null;
       }
-      if (postWriteSyncTimer) {
-        clearTimeout(postWriteSyncTimer);
-        postWriteSyncTimer = null;
-      }
       disableModeControl(true);
       setConnectButtonState('disconnected');
       setClockEnabled(false);
@@ -1036,8 +1029,6 @@
           beginSyncSnapshot();
         } else if (msg.e === 'se') {
           endSyncSnapshot();
-        } else if (msg.e === 'sx') {
-          clearSchedules();
         } else if (msg.e === 'sc') {
           upsertScheduleFromCompact(msg);
         } else if (msg.e === 'sd') {
@@ -1211,17 +1202,6 @@
       syncHydrated = false;
       await sendSyncState();
       scheduleSyncRetry();
-    }
-
-    function queuePostWriteSync(delayMs = 1000) {
-      if (postWriteSyncTimer) {
-        clearTimeout(postWriteSyncTimer);
-      }
-      postWriteSyncTimer = setTimeout(async () => {
-        postWriteSyncTimer = null;
-        log('Refreshing schedules from ESP...');
-        await requestSyncSnapshot();
-      }, delayMs);
     }
 
     function scheduleSyncRetry() {
@@ -1473,12 +1453,6 @@
       renderSchedules();
     }
 
-    function clearSchedules() {
-      bumpSyncSnapshotWatchdog();
-      scheduleState = [];
-      renderSchedules();
-    }
-
     function beginSyncSnapshot() {
       syncSnapshotSawBegin = true;
       awaitingSyncSnapshot = true;
@@ -1487,11 +1461,12 @@
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
       }
-      clearSchedules();
+      scheduleState = [];
       zoneKeys.forEach(zone => {
         deviceModes[zone] = 'SCHEDULE';
         logicRules[zone] = [];
       });
+      renderSchedules();
       renderDeviceModes();
       renderLogicRules();
       bumpSyncSnapshotWatchdog();
