@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v31</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v38</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -831,13 +831,12 @@
       const [hourStr, minuteStr] = timeValue.split(':');
       const hour = parseInt(hourStr, 10);
       const minute = parseInt(minuteStr, 10);
-      const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sched-${Date.now()}`;
+      const id = `s${Date.now().toString(36)}`;
       await sendSetSchedule({
         id,
         zone,
         hour,
         minute,
-        duration_m: durationMinutes,
         duration_s: durationMinutes * 60,
         days
       });
