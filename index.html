@@ -740,6 +740,7 @@
     let syncSnapshotActive = false;
     let syncSnapshotTimer = null;
     let syncRetryTimer = null;
+    let postWriteSyncTimer = null;
     let awaitingSyncSnapshot = false;
     let syncRetryCount = 0;
     let syncSnapshotSawBegin = false;
@@ -841,8 +842,17 @@
         duration_s: durationMinutes * 60,
         days
       });
-      log('Schedule sent. Refreshing schedules from device...');
-      await requestSyncSnapshot();
+      upsertScheduleFromCompact({
+        i: id,
+        z: zone,
+        h: hour,
+        m: minute,
+        d: durationMinutes * 60,
+        n: durationMinutes,
+        days
+      });
+      log('Schedule sent. Waiting for device confirmation...');
+      queuePostWriteSync();
       scheduleForm.reset();
     });
 
@@ -852,9 +862,10 @@
         return;
       }
       const { id } = button.dataset;
+      deleteScheduleById(id);
       await sendDeleteSchedule(id);
-      log('Delete sent. Refreshing schedules from device...');
-      await requestSyncSnapshot();
+      log('Delete sent. Waiting for device confirmation...');
+      queuePostWriteSync();
     });
 
     deviceModeSelects.forEach(select => {
@@ -870,7 +881,7 @@
         deviceModes[zone] = mode;
         renderDeviceModes();
         await sendSetDeviceMode(zone, mode);
-        await requestSyncSnapshot();
+        queuePostWriteSync();
       });
     });
 
@@ -896,9 +907,11 @@
           rule.off = offVal;
         }
         const nextRules = [...(logicRules[zone] || []), rule];
+        logicRules[zone] = nextRules;
+        renderLogicRules();
         await sendSetLogicRules(zone, nextRules);
-        log('Logic rule sent. Refreshing rules from device...');
-        await requestSyncSnapshot();
+        log('Logic rule sent. Waiting for device confirmation...');
+        queuePostWriteSync();
         logicForm.reset();
       });
     }
@@ -915,9 +928,11 @@
         const idx = parseInt(btn.dataset.index, 10);
         if (!zone || Number.isNaN(idx)) return;
         const nextRules = (logicRules[zone] || []).filter((_, i) => i !== idx);
+        logicRules[zone] = nextRules;
+        renderLogicRules();
         await sendSetLogicRules(zone, nextRules);
-        log('Logic delete sent. Refreshing rules from device...');
-        await requestSyncSnapshot();
+        log('Logic delete sent. Waiting for device confirmation...');
+        queuePostWriteSync();
       });
     }
 
@@ -1012,6 +1027,10 @@
       if (syncRetryTimer) {
         clearTimeout(syncRetryTimer);
         syncRetryTimer = null;
+      }
+      if (postWriteSyncTimer) {
+        clearTimeout(postWriteSyncTimer);
+        postWriteSyncTimer = null;
       }
       disableModeControl(true);
       setConnectButtonState('disconnected');
@@ -1208,6 +1227,21 @@
       syncHydrated = false;
       await sendSyncState();
       scheduleSyncRetry();
+    }
+
+    function queuePostWriteSync(delayMs = 500) {
+      if (postWriteSyncTimer) {
+        clearTimeout(postWriteSyncTimer);
+      }
+      postWriteSyncTimer = setTimeout(async () => {
+        postWriteSyncTimer = null;
+        try {
+          log('Refreshing schedules from device...');
+          await requestSyncSnapshot();
+        } catch (error) {
+          log(`Sync request failed: ${error.message || error}`);
+        }
+      }, delayMs);
     }
 
     function scheduleSyncRetry() {
