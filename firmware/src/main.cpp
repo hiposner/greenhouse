@@ -193,12 +193,14 @@ static const NimBLEUUID TX_UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
 
 // Forward declarations
 static void publishState();
+static void publishScheduleClear();
 static void publishScheduleEntry(const ScheduleEntry &entry);
 static void publishScheduleDelete(const String &id);
 static void publishDeviceMode(Zone zone);
 static void publishLogicClear(Zone zone);
 static void publishLogicRule(Zone zone, size_t ruleIndex);
 static void publishLogicRules(Zone zone);
+static void publishScheduleSnapshot();
 static void publishSyncBoundary(bool begin);
 static void publishSensorSnapshot();
 static void publishPong();
@@ -478,6 +480,15 @@ static void publishSensorSnapshot() {
     notifyBlePayload(payload);
 }
 
+static void publishScheduleClear() {
+    JsonDocument doc;
+    doc["e"] = "sx";
+
+    std::string payload;
+    serializeJsonPayload(doc, payload);
+    notifyBlePayload(payload);
+}
+
 static void publishPong() {
     JsonDocument doc;
     doc["evt"] = "pong";
@@ -518,6 +529,13 @@ static void publishScheduleDelete(const String &id) {
     notifyBlePayload(payload);
     Serial.print("Schedule delete: ");
     Serial.println(id);
+}
+
+static void publishScheduleSnapshot() {
+    publishScheduleClear();
+    for (const auto &entry : schedules) {
+        publishScheduleEntry(entry);
+    }
 }
 
 static const char *deviceModeToString(DeviceMode mode) {
@@ -1004,7 +1022,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.println(scheduleId);
             savePersistentState();
             publishState();
-            publishScheduleEntry(entry);
+            publishScheduleSnapshot();
         }
     } else if (equalsIgnoreCase(cmd, "deleteSchedule")) {
         const char *idStr = doc["id"];
@@ -1017,7 +1035,7 @@ static void handleBleCommand(const std::string &payload) {
             Serial.println(idStr);
             savePersistentState();
             publishState();
-            publishScheduleDelete(String(idStr));
+            publishScheduleSnapshot();
         }
     } else if (equalsIgnoreCase(cmd, "setTime")) {
         uint32_t epoch = doc["epoch"] | 0;
