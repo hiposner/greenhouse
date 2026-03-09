@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v34</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v35</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -740,14 +740,10 @@
     let syncSnapshotActive = false;
     let syncSnapshotTimer = null;
     let syncRetryTimer = null;
-    let postWriteSyncTimer = null;
     let awaitingSyncSnapshot = false;
     let syncRetryCount = 0;
     let syncSnapshotSawBegin = false;
     let syncHydrated = false;
-    let pendingScheduleState = null;
-    let pendingDeviceModes = null;
-    let pendingLogicRules = null;
     setInterval(updateCountdowns, 1000);
     setInterval(updateClockDisplay, 1000);
 
@@ -845,20 +841,17 @@
         duration_s: durationMinutes * 60,
         days
       });
-      log('Schedule sent. Waiting for device confirmation from ESP...');
-      queuePostWriteSync();
+      log('Schedule sent. Waiting for device confirmation...');
       scheduleForm.reset();
     });
 
-    scheduleList.addEventListener('click', async event => {
+    scheduleList.addEventListener('click', event => {
       const button = event.target.closest('button[data-id]');
       if (!button) {
         return;
       }
       const { id } = button.dataset;
-      await sendDeleteSchedule(id);
-      log('Delete sent. Waiting for device confirmation from ESP...');
-      queuePostWriteSync();
+      sendDeleteSchedule(id);
     });
 
     deviceModeSelects.forEach(select => {
@@ -874,7 +867,6 @@
         deviceModes[zone] = mode;
         renderDeviceModes();
         await sendSetDeviceMode(zone, mode);
-        queuePostWriteSync();
       });
     });
 
@@ -900,11 +892,8 @@
           rule.off = offVal;
         }
         const nextRules = [...(logicRules[zone] || []), rule];
-        logicRules[zone] = nextRules;
-        renderLogicRules();
         await sendSetLogicRules(zone, nextRules);
         log('Logic rule sent. Waiting for device confirmation...');
-        queuePostWriteSync();
         logicForm.reset();
       });
     }
@@ -921,11 +910,8 @@
         const idx = parseInt(btn.dataset.index, 10);
         if (!zone || Number.isNaN(idx)) return;
         const nextRules = (logicRules[zone] || []).filter((_, i) => i !== idx);
-        logicRules[zone] = nextRules;
-        renderLogicRules();
         await sendSetLogicRules(zone, nextRules);
         log('Logic delete sent. Waiting for device confirmation...');
-        queuePostWriteSync();
       });
     }
 
@@ -1021,13 +1007,6 @@
         clearTimeout(syncRetryTimer);
         syncRetryTimer = null;
       }
-      if (postWriteSyncTimer) {
-        clearTimeout(postWriteSyncTimer);
-        postWriteSyncTimer = null;
-      }
-      pendingScheduleState = null;
-      pendingDeviceModes = null;
-      pendingLogicRules = null;
       disableModeControl(true);
       setConnectButtonState('disconnected');
       setClockEnabled(false);
@@ -1049,7 +1028,7 @@
         } else if (msg.e === 'sb') {
           beginSyncSnapshot();
         } else if (msg.e === 'se') {
-          endSyncSnapshot(true);
+          endSyncSnapshot();
         } else if (msg.e === 'sc') {
           upsertScheduleFromCompact(msg);
         } else if (msg.e === 'sd') {
@@ -1225,21 +1204,6 @@
       scheduleSyncRetry();
     }
 
-    function queuePostWriteSync(delayMs = 1000) {
-      if (postWriteSyncTimer) {
-        clearTimeout(postWriteSyncTimer);
-      }
-      postWriteSyncTimer = setTimeout(async () => {
-        postWriteSyncTimer = null;
-        try {
-          log('Refreshing schedules from ESP...');
-          await requestSyncSnapshot();
-        } catch (error) {
-          log(`Sync request failed: ${error.message || error}`);
-        }
-      }, delayMs);
-    }
-
     function scheduleSyncRetry() {
       if (syncRetryTimer) {
         clearTimeout(syncRetryTimer);
@@ -1383,11 +1347,8 @@
         return;
       }
       bumpSyncSnapshotWatchdog();
-      const targetModes = syncSnapshotActive && pendingDeviceModes ? pendingDeviceModes : deviceModes;
-      targetModes[zone] = mode;
-      if (!syncSnapshotActive) {
-        renderDeviceModes();
-      }
+      deviceModes[zone] = mode;
+      renderDeviceModes();
     }
 
     function clearLogicRulesByZone(zone) {
@@ -1395,11 +1356,8 @@
         return;
       }
       bumpSyncSnapshotWatchdog();
-      const targetRules = syncSnapshotActive && pendingLogicRules ? pendingLogicRules : logicRules;
-      targetRules[zone] = [];
-      if (!syncSnapshotActive) {
-        renderLogicRules();
-      }
+      logicRules[zone] = [];
+      renderLogicRules();
     }
 
     function upsertLogicRuleFromCompact(msg) {
@@ -1425,17 +1383,14 @@
         }
       }
       const idx = Number(msg.i);
-      const targetRules = syncSnapshotActive && pendingLogicRules ? pendingLogicRules : logicRules;
-      targetRules[zone] = targetRules[zone] || [];
+      logicRules[zone] = logicRules[zone] || [];
       if (Number.isInteger(idx) && idx >= 0) {
-        targetRules[zone][idx] = rule;
+        logicRules[zone][idx] = rule;
       } else {
-        targetRules[zone].push(rule);
+        logicRules[zone].push(rule);
       }
-      targetRules[zone] = targetRules[zone].filter(Boolean);
-      if (!syncSnapshotActive) {
-        renderLogicRules();
-      }
+      logicRules[zone] = logicRules[zone].filter(Boolean);
+      renderLogicRules();
     }
 
     let deviceEpochSeconds = 0;
@@ -1472,8 +1427,7 @@
     function upsertScheduleFromCompact(msg) {
       if (!msg || !msg.i) return;
       bumpSyncSnapshotWatchdog();
-      const targetSchedules = syncSnapshotActive && pendingScheduleState ? pendingScheduleState : scheduleState;
-      const idx = targetSchedules.findIndex(s => s.id === msg.i);
+      const idx = scheduleState.findIndex(s => s.id === msg.i);
       const entry = normalizeScheduleEntry({
         id: msg.i,
         zone: msg.z,
@@ -1485,24 +1439,18 @@
         days: msg.days
       });
       if (idx >= 0) {
-        targetSchedules[idx] = entry;
+        scheduleState[idx] = entry;
       } else {
-        targetSchedules.push(entry);
+        scheduleState.push(entry);
       }
-      if (!syncSnapshotActive) {
-        renderSchedules();
-      }
+      renderSchedules();
     }
 
     function deleteScheduleById(id) {
       if (!id) return;
       bumpSyncSnapshotWatchdog();
-      if (syncSnapshotActive && pendingScheduleState) {
-        pendingScheduleState = pendingScheduleState.filter(s => s.id !== id);
-      } else {
-        scheduleState = scheduleState.filter(s => s.id !== id);
-        renderSchedules();
-      }
+      scheduleState = scheduleState.filter(s => s.id !== id);
+      renderSchedules();
     }
 
     function beginSyncSnapshot() {
@@ -1513,13 +1461,14 @@
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
       }
-      pendingScheduleState = [];
-      pendingDeviceModes = {};
-      pendingLogicRules = {};
+      scheduleState = [];
       zoneKeys.forEach(zone => {
-        pendingDeviceModes[zone] = 'SCHEDULE';
-        pendingLogicRules[zone] = [];
+        deviceModes[zone] = 'SCHEDULE';
+        logicRules[zone] = [];
       });
+      renderSchedules();
+      renderDeviceModes();
+      renderLogicRules();
       bumpSyncSnapshotWatchdog();
     }
 
@@ -1530,13 +1479,13 @@
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
       }
-        syncSnapshotTimer = setTimeout(() => {
-          syncSnapshotTimer = null;
-          endSyncSnapshot(false);
-        }, 1500);
-      }
+      syncSnapshotTimer = setTimeout(() => {
+        syncSnapshotTimer = null;
+        endSyncSnapshot();
+      }, 1500);
+    }
 
-    function endSyncSnapshot(complete) {
+    function endSyncSnapshot() {
       if (syncSnapshotTimer) {
         clearTimeout(syncSnapshotTimer);
         syncSnapshotTimer = null;
@@ -1544,15 +1493,7 @@
       const hadBegin = syncSnapshotSawBegin;
       syncSnapshotSawBegin = false;
       syncSnapshotActive = false;
-      if (complete && hadBegin && pendingScheduleState && pendingDeviceModes && pendingLogicRules) {
-        scheduleState = pendingScheduleState;
-        deviceModes = pendingDeviceModes;
-        zoneKeys.forEach(zone => {
-          logicRules[zone] = pendingLogicRules[zone] || [];
-        });
-        pendingScheduleState = null;
-        pendingDeviceModes = null;
-        pendingLogicRules = null;
+      if (hadBegin) {
         awaitingSyncSnapshot = false;
         syncHydrated = true;
         if (syncRetryTimer) {
@@ -1562,11 +1503,6 @@
         renderDeviceModes();
         renderLogicRules();
         renderSchedules();
-      } else {
-        awaitingSyncSnapshot = false;
-        pendingScheduleState = null;
-        pendingDeviceModes = null;
-        pendingLogicRules = null;
       }
     }
 
