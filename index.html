@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v33</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v34</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -845,16 +845,7 @@
         duration_s: durationMinutes * 60,
         days
       });
-      upsertScheduleFromCompact({
-        i: id,
-        z: zone,
-        h: hour,
-        m: minute,
-        d: durationMinutes * 60,
-        n: durationMinutes,
-        days
-      });
-      log('Schedule sent. Waiting for device confirmation...');
+      log('Schedule sent. Waiting for device confirmation from ESP...');
       queuePostWriteSync();
       scheduleForm.reset();
     });
@@ -865,9 +856,8 @@
         return;
       }
       const { id } = button.dataset;
-      deleteScheduleById(id);
       await sendDeleteSchedule(id);
-      log('Delete sent. Waiting for device confirmation...');
+      log('Delete sent. Waiting for device confirmation from ESP...');
       queuePostWriteSync();
     });
 
@@ -1235,14 +1225,14 @@
       scheduleSyncRetry();
     }
 
-    function queuePostWriteSync(delayMs = 500) {
+    function queuePostWriteSync(delayMs = 1000) {
       if (postWriteSyncTimer) {
         clearTimeout(postWriteSyncTimer);
       }
       postWriteSyncTimer = setTimeout(async () => {
         postWriteSyncTimer = null;
         try {
-          log('Refreshing schedules from device...');
+          log('Refreshing schedules from ESP...');
           await requestSyncSnapshot();
         } catch (error) {
           log(`Sync request failed: ${error.message || error}`);
