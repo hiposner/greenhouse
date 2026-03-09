@@ -499,7 +499,7 @@
 </head>
 <body>
   <header>
-    <h1>Greenhouse Control<span class="version-tag">v31</span></h1>
+    <h1>Greenhouse Control<span class="version-tag">v32</span></h1>
     <div style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="mode-group">
         <select class="mode-select" id="mode-select" disabled>
@@ -841,17 +841,20 @@
         duration_s: durationMinutes * 60,
         days
       });
-      log('Schedule sent. Waiting for device confirmation...');
+      log('Schedule sent. Refreshing schedules from device...');
+      await requestSyncSnapshot();
       scheduleForm.reset();
     });
 
-    scheduleList.addEventListener('click', event => {
+    scheduleList.addEventListener('click', async event => {
       const button = event.target.closest('button[data-id]');
       if (!button) {
         return;
       }
       const { id } = button.dataset;
-      sendDeleteSchedule(id);
+      await sendDeleteSchedule(id);
+      log('Delete sent. Refreshing schedules from device...');
+      await requestSyncSnapshot();
     });
 
     deviceModeSelects.forEach(select => {
@@ -867,6 +870,7 @@
         deviceModes[zone] = mode;
         renderDeviceModes();
         await sendSetDeviceMode(zone, mode);
+        await requestSyncSnapshot();
       });
     });
 
@@ -893,7 +897,8 @@
         }
         const nextRules = [...(logicRules[zone] || []), rule];
         await sendSetLogicRules(zone, nextRules);
-        log('Logic rule sent. Waiting for device confirmation...');
+        log('Logic rule sent. Refreshing rules from device...');
+        await requestSyncSnapshot();
         logicForm.reset();
       });
     }
@@ -911,7 +916,8 @@
         if (!zone || Number.isNaN(idx)) return;
         const nextRules = (logicRules[zone] || []).filter((_, i) => i !== idx);
         await sendSetLogicRules(zone, nextRules);
-        log('Logic delete sent. Waiting for device confirmation...');
+        log('Logic delete sent. Refreshing rules from device...');
+        await requestSyncSnapshot();
       });
     }
 
